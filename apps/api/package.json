@@ -1,0 +1,9 @@
+{
+  "name": "@dnd/api",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@dnd/shared": "workspace:*"
+  }
+}

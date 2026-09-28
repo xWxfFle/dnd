@@ -1,0 +1,8 @@
+body {
+  margin: 0;
+  background: var(--mantine-color-body);
+}
+
+#root {
+  min-height: 100vh;
+}

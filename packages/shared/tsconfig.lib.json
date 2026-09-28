@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "../../dist/packages/shared"
+  },
+  "include": ["src/**/*.ts"]
+}

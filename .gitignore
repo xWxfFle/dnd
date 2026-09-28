@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+tmp/
+out-tsc/
+
+# nx
+.nx/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# uploads
+data/
+.cursor/
