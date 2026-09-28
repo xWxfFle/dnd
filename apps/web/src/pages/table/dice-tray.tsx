@@ -1,6 +1,6 @@
 import type { DiceRollDto } from '@dnd/shared'
 import { diceSides, formatDiceFormula, parseDice, readDiceFormula } from '@dnd/shared'
-import { Button, Group, NumberInput, Paper, Text, TextInput } from '@mantine/core'
+import { Button, Group, NumberInput, Stack, Text, TextInput } from '@mantine/core'
 import { useState } from 'react'
 import { sendLive } from '@/pages/table/live'
 
@@ -42,8 +42,7 @@ export function DiceTray(props: { rolls: DiceRollDto[] }) {
   }
 
   return (
-    <Paper withBorder p="sm">
-      <Text fw={700}>Кости</Text>
+    <Stack gap="sm">
       <TextInput
         mt="xs"
         size="xs"
@@ -57,14 +56,14 @@ export function DiceTray(props: { rolls: DiceRollDto[] }) {
         }}
       />
       {error ? <Text size="xs" c="red">{error}</Text> : null}
-      <Group gap={4} mt="xs">
+      <Group gap="xs">
         {diceSides.map(sides => (
           <Button key={sides} size="compact-xs" variant="default" onClick={() => addDie(sides)}>
             {`d${sides}`}
           </Button>
         ))}
       </Group>
-      <Group mt="xs" align="flex-end">
+      <Group align="flex-end" gap="xs">
         <NumberInput
           size="xs"
           w={120}
@@ -89,15 +88,17 @@ export function DiceTray(props: { rolls: DiceRollDto[] }) {
           Сброс
         </Button>
       </Group>
-      <Group mt="xs" gap={6}>
-        <Button size="xs" variant="light" color="teal" onClick={() => sendLive({ type: 'roll', label: 'Преимущество', formula: '1d20', mode: 'advantage' })}>Преимущество</Button>
-        <Button size="xs" variant="light" color="orange" onClick={() => sendLive({ type: 'roll', label: 'Помеха', formula: '1d20', mode: 'disadvantage' })}>Помеха</Button>
+      <Group gap="xs">
+        <Button size="xs" variant="light" onClick={() => sendLive({ type: 'roll', label: 'Преимущество', formula: '1d20', mode: 'advantage' })}>Преимущество</Button>
+        <Button size="xs" variant="default" onClick={() => sendLive({ type: 'roll', label: 'Помеха', formula: '1d20', mode: 'disadvantage' })}>Помеха</Button>
       </Group>
-      {props.rolls.slice(-8).map(item => (
-        <Text key={item.id} size="sm">
-          {`${item.displayName}: ${item.label} ${item.rolls.join(', ')} = ${item.total}`}
-        </Text>
-      ))}
-    </Paper>
+      <Stack gap={6}>
+        {props.rolls.slice(-8).map(item => (
+          <Text key={item.id} size="sm">
+            {`${item.displayName}: ${item.label} ${item.rolls.join(', ')} = ${item.total}`}
+          </Text>
+        ))}
+      </Stack>
+    </Stack>
   )
 }

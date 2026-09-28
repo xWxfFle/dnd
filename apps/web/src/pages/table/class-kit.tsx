@@ -1,6 +1,6 @@
 import type { CharacterDto, SpellSlot, SrdEntryDto } from '@dnd/shared'
 import { readClassFeatures, readSpellIds } from '@dnd/shared'
-import { Button, Group, Stack, Text } from '@mantine/core'
+import { Button, Stack, Text } from '@mantine/core'
 import { useState } from 'react'
 import { sendLive } from '@/pages/table/live'
 import { apiFetch } from '@/shared/api'
@@ -59,27 +59,26 @@ export function ClassKit(props: { sheet: CharacterDto, entries: SrdEntryDto[] })
   }
 
   return (
-    <Stack gap={4}>
-      <Text size="sm">{subclassName ? `${classEntry?.name ?? 'Класс'} · ${subclassName}` : classEntry?.name}</Text>
+    <Stack gap="sm">
+      <Text size="sm" fw={600}>{subclassName ? `${classEntry?.name ?? 'Класс'} · ${subclassName}` : classEntry?.name}</Text>
       {features.map(feature => (
-        <Group key={feature.id} gap={4} wrap="nowrap" align="flex-start">
-          <Text size="sm" style={{ flex: 1 }}>
-            {feature.subclass ? `${feature.name} · подкласс. ${feature.text}` : `${feature.name}. ${feature.text}`}
-          </Text>
-          <Button size="compact-xs" variant={featureButtonVariant(feature, props.sheet.conditions)} onClick={() => applyFeature(feature)}>
+        <Stack key={feature.id} gap={4}>
+          <Text size="sm" fw={600}>{feature.subclass ? `${feature.name} · подкласс` : feature.name}</Text>
+          <Text size="sm" c="dimmed">{feature.text}</Text>
+          <Button size="xs" variant={featureButtonVariant(feature, props.sheet.conditions)} onClick={() => applyFeature(feature)}>
             {featureLabel(feature, props.sheet.conditions)}
           </Button>
-        </Group>
+        </Stack>
       ))}
       {spells.map(spell => (
-        <Group key={spell.id} gap={4} wrap="nowrap">
-          <Text size="sm" style={{ flex: 1 }}>
+        <Stack key={spell.id} gap={4}>
+          <Text size="sm" fw={600}>
             {Number(spell.body.level ?? 0) > 0 ? `${spell.name} · ${String(spell.body.level)} круг` : `${spell.name} · заговор`}
           </Text>
-          <Button size="compact-xs" variant="light" onClick={() => castSpell(spell)}>
+          <Button size="xs" variant="light" onClick={() => castSpell(spell)}>
             {spellHasDice(spell) ? 'Бросить' : 'Ячейка'}
           </Button>
-        </Group>
+        </Stack>
       ))}
       <SlotLine slots={props.sheet.slots} />
       {error ? <Text size="xs" c="red">{error}</Text> : null}

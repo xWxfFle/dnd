@@ -96,11 +96,11 @@ export function MapBoard(props: {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <Group gap={6} mb="xs" wrap="wrap" style={{ flex: 'none' }} align="center">
         {(['move', 'ruler', 'circle', 'cone', 'line'] as Tool[]).map(item => (
-          <Button key={item} size="xs" variant={tool === item ? 'filled' : 'light'} onClick={() => selectTool(item)}>{toolLabel[item]}</Button>
+          <Button key={item} size="xs" variant={tool === item ? 'filled' : 'default'} onClick={() => selectTool(item)}>{toolLabel[item]}</Button>
         ))}
         {props.dm && (
           <>
-            <Button size="xs" variant={tool === 'fog' ? 'filled' : 'light'} color="yellow" onClick={() => selectTool('fog')}>Туман</Button>
+            <Button size="xs" variant={tool === 'fog' ? 'filled' : 'default'} onClick={() => selectTool('fog')}>Туман</Button>
             <Button
               size="xs"
               variant="light"
@@ -116,7 +116,7 @@ export function MapBoard(props: {
             >
               Закрыть полигон
             </Button>
-            <Button size="xs" variant="light" color="red" onClick={() => sendLive({ type: 'fog', sceneId: props.scene.id, fog: [] })}>Сбросить туман</Button>
+            <Button size="xs" variant="default" onClick={() => sendLive({ type: 'fog', sceneId: props.scene.id, fog: [] })}>Сбросить туман</Button>
           </>
         )}
         <Text size="xs" c="dimmed">{measure ?? `Поле ${columns}×${rows} · клетка 5 футов`}</Text>
