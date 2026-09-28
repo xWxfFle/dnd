@@ -4,19 +4,22 @@ import { createField, createForm, createWizardForm, readStoreSnapshot, step } fr
 import { zodFieldValidator } from '@virentia/forms-zod'
 import { trigger } from '@virentia/net-core'
 import { z } from 'zod'
+import { bootHome } from '@/pages/home/model'
 import { bootTable } from '@/pages/table/live'
+import { bootTableModel } from '@/pages/table/model'
 import {
   campaignsQuery,
   createCampaignMutation,
   createCharacterMutation,
   joinMutation,
   loginMutation,
+  meQuery,
   registerMutation,
   snapshotQuery,
   srdQuery,
 } from './api'
 import { characterRoute, homeRoute, joinRoute, loginRoute, tableRoute } from './routing'
-import { appScope, token } from './session'
+import { appScope, currentUser, token } from './session'
 
 export const loginForm = createForm({
   schema: {
@@ -34,8 +37,6 @@ export const registerForm = createForm({
   },
   validationStrategies: ['submit'],
 })
-
-export const campaignName = createField('Новая кампания', { validate: zodFieldValidator(z.string().min(1)) })
 
 const abilityField = () => createField(10, { validate: zodFieldValidator(z.number().int().min(1).max(30)) })
 
@@ -60,29 +61,31 @@ export const characterWizard = createWizardForm({
   ],
 })
 
-function valuesOf<T>(unit: { value?: T } | Parameters<typeof readStoreSnapshot>[0]) {
-  return readStoreSnapshot(unit as Parameters<typeof readStoreSnapshot>[0])
-}
-
 export function bootClient() {
   scoped(appScope, () => {
     reaction({
       on: loginForm.submitted,
       run() {
-        void loginMutation(valuesOf(loginForm.values) as { email: string, password: string })
+        const values = readStoreSnapshot(loginForm.values)
+        void loginMutation({ email: values.email, password: values.password })
       },
     })
     reaction({
       on: registerForm.submitted,
       run() {
-        const values = valuesOf(registerForm.values) as { displayName: string, email: string, password: string }
-        void registerMutation(values)
+        const values = readStoreSnapshot(registerForm.values)
+        void registerMutation({
+          displayName: values.displayName,
+          email: values.email,
+          password: values.password,
+        })
       },
     })
     reaction({
       on: loginMutation.doneData,
       run(result) {
         token.value = result.accessToken
+        currentUser.value = result.user
         void homeRoute.open({ replace: true })
       },
     })
@@ -90,6 +93,7 @@ export function bootClient() {
       on: registerMutation.doneData,
       run(result) {
         token.value = result.accessToken
+        currentUser.value = result.user
         void homeRoute.open({ replace: true })
       },
     })
@@ -109,18 +113,7 @@ export function bootClient() {
       on: characterWizard.completed,
       run() {
         const campaignId = openedCampaignId()
-        const values = valuesOf(characterWizard.form.values) as {
-          name: string
-          classId: string
-          speciesId: string
-          backgroundId: string
-          str: number
-          dex: number
-          con: number
-          int: number
-          wis: number
-          cha: number
-        }
+        const values = readStoreSnapshot(characterWizard.form.values)
         if (!campaignId)
           return
         void createCharacterMutation({
@@ -156,6 +149,14 @@ export function bootClient() {
       filter: () => Boolean(openedCampaignId()),
     })
     reaction({
+      on: meQuery.doneData,
+      run(result) {
+        currentUser.value = result.user
+      },
+    })
+    if (token.value && !currentUser.value)
+      void meQuery()
+    reaction({
       on: joinRoute.opened,
       run() {
         const code = joinRoute.params.value.code
@@ -164,7 +165,9 @@ export function bootClient() {
       },
     })
   })
+  bootHome()
   bootTable()
+  bootTableModel()
 }
 
 function openedCampaignId() {
@@ -178,6 +181,7 @@ function openedCampaignId() {
 export function signOut() {
   scoped(appScope, () => {
     token.value = null
+    currentUser.value = null
     void loginRoute.open({ replace: true })
   })
 }

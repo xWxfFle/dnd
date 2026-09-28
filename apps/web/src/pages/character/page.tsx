@@ -1,9 +1,10 @@
 import { abilities, abilityLabel } from '@dnd/shared'
 import { Button, Group, NumberInput, Select, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useField, useWizard } from '@virentia/forms-react'
-import { useQuery } from '@virentia/net-react'
+import { useUnit } from '@virentia/react'
 import { srdQuery } from '@/shared/api'
 import { characterWizard } from '@/shared/boot'
+import { AccountMenu } from '@/shared/ui/account-menu'
 
 const stepTitle = {
   class: 'Класс',
@@ -14,8 +15,7 @@ const stepTitle = {
 
 export function CharacterPage() {
   const wizard = useWizard(characterWizard)
-  const srd = useQuery(srdQuery)
-  const entries = srd.data ?? []
+  const entries = useUnit(srdQuery.data) ?? []
   const classId = useField(characterWizard.form.fields.classId)
   const speciesId = useField(characterWizard.form.fields.speciesId)
   const backgroundId = useField(characterWizard.form.fields.backgroundId)
@@ -32,7 +32,10 @@ export function CharacterPage() {
   const options = (kind: string) => entries.filter(entry => entry.kind === kind).map(entry => ({ value: entry.id, label: entry.name }))
   return (
     <Stack maw={640} mx="auto" p="md">
-      <Title order={2}>Новый персонаж</Title>
+      <Group justify="space-between">
+        <Title order={2}>Новый персонаж</Title>
+        <AccountMenu />
+      </Group>
       <Text c="dimmed">{stepTitle[current as keyof typeof stepTitle] ?? current}</Text>
       {current === 'class' && (
         <Select label="Класс" data={options('class')} value={classId.value} onChange={value => value && void classId.fill(value)} />

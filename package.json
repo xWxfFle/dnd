@@ -32,8 +32,8 @@
     "@virentia/forms": "^0.2.3",
     "@virentia/forms-react": "^0.2.3",
     "@virentia/forms-zod": "^0.1.4",
-    "@virentia/net-core": "^0.1.2",
-    "@virentia/net-react": "^0.1.2",
+    "@virentia/net-core": "^0.1.3",
+    "@virentia/net-react": "^0.1.3",
     "@virentia/react": "^0.5.1",
     "@virentia/router": "^0.4.1",
     "@virentia/router-paths": "^0.1.2",
@@ -48,10 +48,6 @@
     "react-dom": "^19.2.7",
     "react-konva": "^19.2.1",
     "zod": "^4.4.3"
-  },
-  "overrides": {
-    "@virentia/react": "0.5.1",
-    "@virentia/core": "0.11.1"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^9.0.0",

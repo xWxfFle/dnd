@@ -1,10 +1,11 @@
-import { Button, Paper, PasswordInput, Stack, TextInput, Title } from '@mantine/core'
+import { Button, Group, Paper, PasswordInput, Stack, TextInput, Title } from '@mantine/core'
 import { useField, useForm } from '@virentia/forms-react'
 import { useUnit } from '@virentia/react'
 import { Link } from '@virentia/router-react'
 import { registerMutation } from '@/shared/api'
 import { registerForm } from '@/shared/boot'
 import { loginRoute } from '@/shared/routing'
+import { AccountMenu } from '@/shared/ui/account-menu'
 
 export function RegisterPage() {
   const form = useForm(registerForm)
@@ -14,7 +15,10 @@ export function RegisterPage() {
   const pending = useUnit(registerMutation.pending)
   return (
     <Stack maw={420} mx="auto" mt={80} p="md">
-      <Title order={2}>Новый игрок</Title>
+      <Group justify="space-between">
+        <Title order={2}>Новый игрок</Title>
+        <AccountMenu />
+      </Group>
       <Paper withBorder p="md">
         <form onSubmit={(event) => {
           event.preventDefault()

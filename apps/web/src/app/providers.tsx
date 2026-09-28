@@ -5,7 +5,7 @@ import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
 
 const theme = createTheme({
-  primaryColor: 'violet',
+  primaryColor: 'blue',
   defaultRadius: 'md',
 })
 

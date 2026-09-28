@@ -1,11 +1,17 @@
 import type { LoginInput, RegisterInput } from '@dnd/shared'
-import { authResponseSchema, campaignSchema, characterSchema, diceRollSchema, snapshotSchema, srdEntrySchema } from '@dnd/shared'
+import { authResponseSchema, campaignSchema, characterSchema, diceRollSchema, meResponseSchema, snapshotSchema, srdEntrySchema } from '@dnd/shared'
 import { scoped } from '@virentia/core'
 import { mutation, query } from '@virentia/net-core'
 import { z } from 'zod'
-import { appScope, readToken, token } from './session'
+import { appScope, currentUser, readToken, token } from './session'
 
 export class ApiError extends Error {}
+
+type ApiMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+
+interface Parser<T> {
+  parse: (data: unknown) => T
+}
 
 export async function apiFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
@@ -18,6 +24,7 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
   if (response.status === 401 && !path.endsWith('/auth/login') && !path.endsWith('/auth/register')) {
     scoped(appScope, () => {
       token.value = null
+      currentUser.value = null
     })
   }
   if (!response.ok) {
@@ -28,86 +35,61 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
   return response
 }
 
+export function apiSend(path: string, method: ApiMethod = 'GET', body?: unknown) {
+  return apiFetch(path, {
+    method,
+    body: body === undefined || body instanceof FormData ? body : JSON.stringify(body),
+  })
+}
+
+export async function apiRead<T>(path: string, schema: Parser<T>, method: ApiMethod = 'GET', body?: unknown, failure?: string) {
+  try {
+    const response = await apiSend(path, method, body)
+    return schema.parse(await response.json())
+  }
+  catch (error) {
+    if (failure && error instanceof ApiError)
+      throw new ApiError(failure)
+    throw error
+  }
+}
+
 export const loginMutation = mutation({
-  handler: async (input: LoginInput) => {
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    })
-    if (!response.ok)
-      throw new ApiError('Неверная почта или пароль')
-    return authResponseSchema.parse(await response.json())
-  },
+  handler: (input: LoginInput) => apiRead('/api/auth/login', authResponseSchema, 'POST', input, 'Неверная почта или пароль'),
 })
 
 export const registerMutation = mutation({
-  handler: async (input: RegisterInput) => {
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    })
-    if (!response.ok)
-      throw new ApiError('Не удалось зарегистрироваться')
-    return authResponseSchema.parse(await response.json())
-  },
+  handler: (input: RegisterInput) => apiRead('/api/auth/register', authResponseSchema, 'POST', input, 'Не удалось зарегистрироваться'),
+})
+
+export const meQuery = query({
+  handler: () => apiRead('/api/auth/me', meResponseSchema),
 })
 
 export const campaignsQuery = query({
-  handler: async () => {
-    const response = await apiFetch('/api/campaigns')
-    return z.array(campaignSchema).parse(await response.json())
-  },
+  handler: () => apiRead('/api/campaigns', z.array(campaignSchema)),
 })
 
 export const srdQuery = query({
-  handler: async () => {
-    const response = await apiFetch('/api/srd')
-    return z.array(srdEntrySchema).parse(await response.json())
-  },
+  handler: () => apiRead('/api/srd', z.array(srdEntrySchema)),
 })
 
 export const snapshotQuery = query({
-  handler: async (campaignId: string) => {
-    const response = await apiFetch(`/api/campaigns/${campaignId}/snapshot`)
-    return snapshotSchema.parse(await response.json())
-  },
+  handler: (campaignId: string) => apiRead(`/api/campaigns/${campaignId}/snapshot`, snapshotSchema),
 })
 
 export const createCampaignMutation = mutation({
-  handler: async (name: string) => {
-    const response = await apiFetch('/api/campaigns', {
-      method: 'POST',
-      body: JSON.stringify({ name }),
-    })
-    return campaignSchema.parse(await response.json())
-  },
+  handler: (name: string) => apiRead('/api/campaigns', campaignSchema, 'POST', { name }),
 })
 
 export const joinMutation = mutation({
-  handler: async (code: string) => {
-    const response = await apiFetch(`/api/campaigns/join/${code}`, { method: 'POST' })
-    return campaignSchema.parse(await response.json())
-  },
+  handler: (code: string) => apiRead(`/api/campaigns/join/${code}`, campaignSchema, 'POST'),
 })
 
 export const createCharacterMutation = mutation({
-  handler: async (input: { campaignId: string, body: unknown }) => {
-    const response = await apiFetch(`/api/campaigns/${input.campaignId}/characters`, {
-      method: 'POST',
-      body: JSON.stringify(input.body),
-    })
-    return characterSchema.parse(await response.json())
-  },
+  handler: (input: { campaignId: string, body: unknown }) => apiRead(`/api/campaigns/${input.campaignId}/characters`, characterSchema, 'POST', input.body),
 })
 
 export const rollMutation = mutation({
-  handler: async (input: { campaignId: string, label: string, formula: string, mode: 'normal' | 'advantage' | 'disadvantage' }) => {
-    const response = await apiFetch(`/api/campaigns/${input.campaignId}/rolls`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
-    return diceRollSchema.parse(await response.json())
-  },
+  handler: (input: { campaignId: string, label: string, formula: string, mode: 'normal' | 'advantage' | 'disadvantage' }) => apiRead(`/api/campaigns/${input.campaignId}/rolls`, diceRollSchema, 'POST', input),
 })

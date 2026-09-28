@@ -14,7 +14,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
       '@dnd/shared': path.resolve(__dirname, '../../packages/shared/src/index.ts'),
     },
-    dedupe: ['react', 'react-dom', '@virentia/react', '@virentia/core'],
+    dedupe: ['react', 'react-dom'],
   },
   server: {
     port: 4200,

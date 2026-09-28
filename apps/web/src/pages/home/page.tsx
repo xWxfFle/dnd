@@ -1,22 +1,24 @@
 import { Button, Group, Paper, Stack, Text, TextInput, Title } from '@mantine/core'
-import { scoped } from '@virentia/core'
 import { useField } from '@virentia/forms-react'
-import { useMutation, useQuery } from '@virentia/net-react'
+import { useUnit } from '@virentia/react'
 import { campaignsQuery, createCampaignMutation } from '@/shared/api'
-import { campaignName, signOut } from '@/shared/boot'
-import { tableRoute } from '@/shared/routing'
-import { appScope } from '@/shared/session'
+import { AccountMenu } from '@/shared/ui/account-menu'
+import { campaignCreateRequested, campaignName, campaignOpened } from './model'
 
 export function HomePage() {
-  const campaigns = useQuery(campaignsQuery)
-  const create = useMutation(createCampaignMutation)
   const name = useField(campaignName)
+  const { campaigns, pending, createRequested, openCampaign } = useUnit({
+    campaigns: campaignsQuery.data,
+    pending: createCampaignMutation.pending,
+    createRequested: campaignCreateRequested,
+    openCampaign: campaignOpened,
+  })
   const localhost = typeof window !== 'undefined' && window.location.hostname === 'localhost'
   return (
     <Stack maw={720} mx="auto" p="md">
       <Group justify="space-between">
         <Title order={2}>Кампании</Title>
-        <Button variant="subtle" onClick={signOut}>Выйти</Button>
+        <AccountMenu />
       </Group>
       {localhost && (
         <Paper withBorder p="sm">
@@ -29,10 +31,10 @@ export function HomePage() {
       )}
       <Group align="end">
         <TextInput label="Название" value={name.value} onChange={event => void name.fill(event.currentTarget.value)} />
-        <Button loading={create.pending} onClick={() => void create.mutate(name.value)}>Создать</Button>
+        <Button loading={pending} onClick={() => void createRequested()}>Создать</Button>
       </Group>
       <Stack>
-        {(campaigns.data ?? []).map(campaign => (
+        {(campaigns ?? []).map(campaign => (
           <Paper key={campaign.id} withBorder p="sm">
             <Group justify="space-between">
               <div>
@@ -45,18 +47,11 @@ export function HomePage() {
                   {campaign.inviteCode}
                 </Text>
               </div>
-              <Button onClick={() => {
-                scoped(appScope, () => {
-                  void tableRoute.open({ params: { id: campaign.id } })
-                })
-              }}
-              >
-                Открыть
-              </Button>
+              <Button onClick={() => openCampaign(campaign.id)}>Открыть</Button>
             </Group>
           </Paper>
         ))}
-        {campaigns.data?.length === 0 && <Text c="dimmed">Кампаний пока нет.</Text>}
+        {campaigns?.length === 0 && <Text c="dimmed">Кампаний пока нет.</Text>}
       </Stack>
     </Stack>
   )

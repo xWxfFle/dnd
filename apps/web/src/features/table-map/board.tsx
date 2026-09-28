@@ -2,7 +2,6 @@ import type { SceneDto, TokenDto } from '@dnd/shared'
 import { Button, Group, Text } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
 import { Circle, Layer, Line, Image as MapImage, Rect, Group as ShapeGroup, Text as ShapeText, Stage } from 'react-konva'
-import { sendLive } from '@/pages/table/live'
 
 type Tool = 'move' | 'ruler' | 'circle' | 'cone' | 'line' | 'fog'
 
@@ -29,6 +28,8 @@ export function MapBoard(props: {
   tokens: TokenDto[]
   dm: boolean
   avatars: Record<string, string>
+  onTokenMoved: (move: { tokenId: string, x: number, y: number }) => void
+  onFogUpdated: (fog: SceneDto['fog']) => void
 }) {
   const cell = props.scene.grid.cellSize
   const columns = props.scene.grid.columns
@@ -106,17 +107,13 @@ export function MapBoard(props: {
               variant="light"
               disabled={fogDraft.length < 6}
               onClick={() => {
-                sendLive({
-                  type: 'fog',
-                  sceneId: props.scene.id,
-                  fog: [...props.scene.fog, { id: crypto.randomUUID(), points: fogDraft }],
-                })
+                props.onFogUpdated([...props.scene.fog, { id: crypto.randomUUID(), points: fogDraft }])
                 setFogDraft([])
               }}
             >
               Закрыть полигон
             </Button>
-            <Button size="xs" variant="default" onClick={() => sendLive({ type: 'fog', sceneId: props.scene.id, fog: [] })}>Сбросить туман</Button>
+            <Button size="xs" variant="default" onClick={() => props.onFogUpdated([])}>Сбросить туман</Button>
           </>
         )}
         <Text size="xs" c="dimmed">{measure ?? `Поле ${columns}×${rows} · клетка 5 футов`}</Text>
@@ -186,6 +183,7 @@ export function MapBoard(props: {
                 onDragged={() => {
                   draggedRef.current = true
                 }}
+                onMoved={props.onTokenMoved}
               />
             ))}
           </Layer>
@@ -203,6 +201,7 @@ function TokenPiece(props: {
   avatarUrl: string | null
   draggable: boolean
   onDragged: () => void
+  onMoved: (move: { tokenId: string, x: number, y: number }) => void
 }) {
   const radius = Math.max(props.token.size, 1) * props.cell / 2
   const labelWidth = props.cell * 3
@@ -225,7 +224,7 @@ function TokenPiece(props: {
           x: (cellX + 0.5) * props.cell,
           y: (cellY + 0.5) * props.cell,
         })
-        sendLive({ type: 'move', tokenId: props.token.id, x: cellX, y: cellY })
+        props.onMoved({ tokenId: props.token.id, x: cellX, y: cellY })
       }}
     >
       <Circle
