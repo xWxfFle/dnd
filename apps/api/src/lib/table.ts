@@ -2,6 +2,7 @@ import type { Abilities, AttackDef, CampaignRole, CharacterDto, CombatDto, DiceR
 import {
   abilityModifier,
   armorClass,
+  concealEnemies,
   hitDieHeal,
   hitDieSidesForClass,
   isDeadFromExhaustion,
@@ -89,7 +90,7 @@ export function toSceneDto(row: SceneRow, role: CampaignRole): SceneDto {
   }
 }
 
-export function toTokenDto(row: TokenRow): TokenDto {
+export function toTokenDto(row: TokenRow, characterAvatarPath: string | null = null): TokenDto {
   return {
     id: row.id,
     sceneId: row.sceneId,
@@ -103,7 +104,31 @@ export function toTokenDto(row: TokenRow): TokenDto {
     characterId: row.characterId,
     monsterId: row.monsterId,
     color: row.color,
+    ac: row.ac,
+    speed: row.speed,
+    attacks: asAttacks(row.attacks),
+    imageUrl: tokenImageUrl(row, characterAvatarPath),
+    obscured: false,
   }
+}
+
+function tokenImageUrl(row: TokenRow, characterAvatarPath: string | null) {
+  if (row.imagePath)
+    return markedUrl(`/api/tokens/${row.id}/image`, row.imagePath)
+  if (row.characterId && characterAvatarPath)
+    return markedUrl(`/api/characters/${row.characterId}/avatar`, characterAvatarPath)
+  return null
+}
+
+function markedUrl(path: string, filePath: string) {
+  return `${path}?v=${fileMark(filePath)}`
+}
+
+function fileMark(filePath: string) {
+  let mark = 0
+  for (const char of filePath)
+    mark = (mark * 31 + char.charCodeAt(0)) >>> 0
+  return mark.toString(36)
 }
 
 function srd(id: string) {
@@ -214,10 +239,15 @@ export async function listTokens(sceneIds: string[], role: CampaignRole) {
   if (sceneIds.length === 0)
     return []
   const rows = await db.select().from(tokens).where(inArray(tokens.sceneId, sceneIds))
-  return rows
+  const visible = rows
     .filter(row => sceneIds.includes(row.sceneId))
     .filter(row => role === 'dm' || !row.hidden)
-    .map(toTokenDto)
+  const characterIds = [...new Set(visible.flatMap(row => row.characterId ? [row.characterId] : []))]
+  const portraits = characterIds.length === 0
+    ? []
+    : await db.select({ id: characters.id, avatarPath: characters.avatarPath }).from(characters).where(inArray(characters.id, characterIds))
+  const avatarByCharacter = new Map(portraits.map(row => [row.id, row.avatarPath]))
+  return visible.map(row => toTokenDto(row, row.characterId ? avatarByCharacter.get(row.characterId) ?? null : null))
 }
 
 export async function loadCombat(sceneId: string, role: CampaignRole): Promise<CombatDto | null> {
@@ -268,6 +298,24 @@ export async function listRolls(campaignId: string): Promise<DiceRollDto[]> {
   })).reverse()
 }
 
+function concealCombat(combat: CombatDto | null, concealment: { hidden: Set<string>, obscured: Set<string> }) {
+  if (!combat)
+    return null
+  const activeId = combat.combatants[combat.activeIndex]?.id
+  const combatants = combat.combatants.flatMap((combatant) => {
+    if (combatant.tokenId && concealment.hidden.has(combatant.tokenId))
+      return []
+    if (combatant.tokenId && concealment.obscured.has(combatant.tokenId))
+      return [{ ...combatant, name: 'Неизвестный', hpCurrent: 1, hpMax: 1 }]
+    return [combatant]
+  })
+  return {
+    ...combat,
+    combatants,
+    activeIndex: combatants.findIndex(combatant => combatant.id === activeId),
+  }
+}
+
 export async function buildSnapshot(userId: string, campaignId: string): Promise<SnapshotDto | null> {
   const [member] = await db
     .select({ campaign: campaigns, role: campaignMembers.role })
@@ -283,6 +331,32 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
   const active = sceneRows.find(scene => scene.active) ?? sceneRows[0] ?? null
   const sheetRows = await db.select().from(characters).where(eq(characters.campaignId, campaignId))
   const visibleSheets = role === 'dm' ? sheetRows : sheetRows.filter(row => row.userId === userId)
+  const concealment = role === 'dm'
+    ? { hidden: new Set<string>(), obscured: new Set<string>() }
+    : concealEnemies({
+        tokens: tokenRows,
+        fogByScene: new Map(sceneRows.map(scene => [scene.id, scene.fog])),
+      })
+  const tokens = tokenRows.flatMap((token) => {
+    if (concealment.hidden.has(token.id))
+      return []
+    if (!concealment.obscured.has(token.id))
+      return [token]
+    return [{
+      ...token,
+      name: 'Неизвестный',
+      monsterId: null,
+      hpCurrent: 1,
+      hpMax: 1,
+      ac: null,
+      speed: null,
+      attacks: [],
+      imageUrl: null,
+      color: '#2a2436',
+      obscured: true,
+    }]
+  })
+  const combat = active ? await loadCombat(active.id, role) : null
   return {
     campaign: {
       id: member.campaign.id,
@@ -293,8 +367,8 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
       createdAt: member.campaign.createdAt.toISOString(),
     },
     scenes: sceneRows,
-    tokens: tokenRows,
-    combat: active ? await loadCombat(active.id, role) : null,
+    tokens,
+    combat: concealCombat(combat, concealment),
     rolls: await listRolls(campaignId),
     characters: visibleSheets.map(toCharacterDto),
   }
@@ -327,7 +401,7 @@ export async function recordRoll(input: {
   if (!read)
     return null
   const result = resolveRoll(read, input.mode, input.exhaustion ?? 0)
-  const [row] = await db.insert(diceRolls).values({
+  return saveRoll({
     campaignId: input.campaignId,
     userId: input.userId,
     label: input.label,
@@ -335,6 +409,26 @@ export async function recordRoll(input: {
     mode: input.mode,
     rolls: result.rolls,
     total: result.total,
+  })
+}
+
+export async function saveRoll(input: {
+  campaignId: string
+  userId: string
+  label: string
+  formula: string
+  mode: DiceRollDto['mode']
+  rolls: number[]
+  total: number
+}) {
+  const [row] = await db.insert(diceRolls).values({
+    campaignId: input.campaignId,
+    userId: input.userId,
+    label: input.label,
+    formula: input.formula,
+    mode: input.mode,
+    rolls: input.rolls,
+    total: input.total,
   }).returning()
   const [user] = await db.select().from(users).where(eq(users.id, input.userId)).limit(1)
   return {
@@ -345,8 +439,8 @@ export async function recordRoll(input: {
     label: row.label,
     formula: row.formula,
     mode: row.mode as DiceRollDto['mode'],
-    rolls: result.rolls,
-    total: result.total,
+    rolls: input.rolls,
+    total: input.total,
     createdAt: row.createdAt.toISOString(),
   } satisfies DiceRollDto
 }

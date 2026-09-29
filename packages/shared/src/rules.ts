@@ -163,6 +163,38 @@ export function rollDamage(formula: string, critical: boolean, random: () => num
   }
 }
 
+export function readArmorClass(body: Record<string, unknown> | null | undefined) {
+  const ac = body?.ac
+  return typeof ac === 'number' ? ac : null
+}
+
+export function resolveAttack(input: {
+  attack: AttackDef
+  armorClass: number
+  exhaustion?: number
+  random?: () => number
+}) {
+  const random = input.random ?? Math.random
+  const attack = rollD20({
+    bonus: input.attack.attackBonus,
+    mode: 'normal',
+    exhaustion: input.exhaustion,
+    random,
+  })
+  const critical = attack.natural === 20
+  const miss = attack.natural === 1 || (!critical && attack.total < input.armorClass)
+  if (miss) {
+    return { hit: false as const, critical: false, attack, damage: 0 }
+  }
+  const rolled = attackDamage(input.attack, critical, random)
+  return {
+    hit: true as const,
+    critical,
+    attack,
+    damage: Math.max(0, rolled.total),
+  }
+}
+
 export function attackDamage(attack: AttackDef, critical: boolean, random: () => number = Math.random) {
   const weapon = rollFormula(attack.damageDice || '0', random)
   const doubled = critical ? rollFormula(attack.damageDice || '0', random) : { total: 0, rolls: [] as number[] }
@@ -205,4 +237,73 @@ export function hitDieHeal(sides: number, conScore: number, random: () => number
 export function hitDieSidesForClass(hitDie: string) {
   const match = hitDie.match(/d(\d+)/)
   return match ? Number(match[1]) : 8
+}
+
+export interface GridToken {
+  id: string
+  sceneId: string
+  x: number
+  y: number
+  characterId: string | null
+}
+
+export function concealEnemies(input: {
+  tokens: GridToken[]
+  fogByScene: ReadonlyMap<string, { points: number[] }[]>
+}) {
+  const hidden = new Set<string>()
+  const obscured = new Set<string>()
+  const allies = input.tokens.filter(token => token.characterId != null)
+  for (const token of input.tokens) {
+    if (token.characterId != null)
+      continue
+    const fog = input.fogByScene.get(token.sceneId) ?? []
+    if (!coversCell(fog, token.x, token.y))
+      continue
+    const seen = allies.some(ally => ally.sceneId === token.sceneId && beside(ally, token))
+    if (seen)
+      obscured.add(token.id)
+    else
+      hidden.add(token.id)
+  }
+  return { hidden, obscured }
+}
+
+function beside(left: { x: number, y: number }, right: { x: number, y: number }) {
+  return Math.abs(left.x - right.x) <= 1 && Math.abs(left.y - right.y) <= 1
+}
+
+function coversCell(fog: { points: number[] }[], x: number, y: number) {
+  return fog.some(polygon => cellInside(polygon.points, x, y))
+}
+
+function cellInside(points: number[], x: number, y: number) {
+  const square = squareOf(points)
+  if (square)
+    return square.x === x && square.y === y
+  return contains(points, x + 0.5, y + 0.5)
+}
+
+function squareOf(points: number[]) {
+  const [x, y, x2, y2, x3, y3, x4, y4] = points
+  if (points.length !== 8 || x == null || y == null)
+    return null
+  if (x2 !== x + 1 || y2 !== y || x3 !== x + 1 || y3 !== y + 1 || x4 !== x || y4 !== y + 1)
+    return null
+  return { x, y }
+}
+
+function contains(points: number[], x: number, y: number) {
+  let inside = false
+  for (let i = 0, j = points.length - 2; i < points.length; i += 2) {
+    const xi = points[i] ?? 0
+    const yi = points[i + 1] ?? 0
+    const xj = points[j] ?? 0
+    const yj = points[j + 1] ?? 0
+    const cross = ((yi > y) !== (yj > y)) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi
+    if (cross)
+      inside = !inside
+    j = i
+  }
+  return inside
 }

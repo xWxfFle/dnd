@@ -15,6 +15,17 @@ export const connectFx = effect((campaignId: string) => {
     url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     url.searchParams.set('token', current ?? '')
     const next = liveClient.value.connect(url.toString())
+    let opened = false
+    next.onopen = () => {
+      opened = true
+    }
+    next.onclose = () => {
+      if (!opened || !liveClient.value.isCurrent(next))
+        return
+      setTimeout(() => {
+        void connectFx(campaignId)
+      }, 1000)
+    }
     next.onmessage = (event) => {
       const payload = JSON.parse(String(event.data)) as { type?: string, snapshot?: unknown }
       if (payload.type !== 'snapshot')

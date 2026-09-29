@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm'
 import { Elysia, status } from 'elysia'
 import { db } from '../../db'
-import { characters, scenes } from '../../db/schema'
-import { publicCharacterParams, publicSceneParams } from '../params'
+import { characters, scenes, tokens } from '../../db/schema'
+import { publicCharacterParams, publicSceneParams, publicTokenParams } from '../params'
 
 export const filesModule = new Elysia({ name: 'files' })
   .get('/scenes/:sceneId/image', async ({ params }) => {
@@ -15,6 +15,17 @@ export const filesModule = new Elysia({ name: 'files' })
     return file
   }, {
     params: publicSceneParams,
+  })
+  .get('/tokens/:tokenId/image', async ({ params }) => {
+    const [token] = await db.select().from(tokens).where(eq(tokens.id, params.tokenId)).limit(1)
+    if (!token?.imagePath)
+      return status(404, { error: 'Нет картинки' })
+    const file = Bun.file(token.imagePath)
+    if (!(await file.exists()))
+      return status(404, { error: 'Файл картинки не найден' })
+    return file
+  }, {
+    params: publicTokenParams,
   })
   .get('/characters/:characterId/avatar', async ({ params }) => {
     const [character] = await db.select().from(characters).where(eq(characters.id, params.characterId)).limit(1)

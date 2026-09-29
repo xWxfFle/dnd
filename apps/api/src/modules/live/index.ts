@@ -14,6 +14,12 @@ interface LiveSession {
 
 const sessions = new WeakMap<object, LiveSession>()
 
+function socketKey(ws: object) {
+  if ('raw' in ws && typeof ws.raw === 'object' && ws.raw)
+    return ws.raw
+  return ws
+}
+
 export const liveModule = new Elysia({ name: 'live' })
   .use(jwtPlugin)
   .ws('/live/:campaignId', {
@@ -36,12 +42,12 @@ export const liveModule = new Elysia({ name: 'live' })
         role,
         send: payload => ws.send(payload),
       })
-      sessions.set(ws, { campaignId, userId, role, leave })
+      sessions.set(socketKey(ws), { campaignId, userId, role, leave })
       const snapshot = await buildSnapshot(userId, campaignId)
       ws.send({ type: 'snapshot', snapshot })
     },
     async message(ws, message) {
-      const session = sessions.get(ws)
+      const session = sessions.get(socketKey(ws))
       if (!session)
         return
       await handleLiveMessage({
@@ -52,8 +58,9 @@ export const liveModule = new Elysia({ name: 'live' })
       }, message)
     },
     close(ws) {
-      const session = sessions.get(ws)
+      const key = socketKey(ws)
+      const session = sessions.get(key)
       session?.leave()
-      sessions.delete(ws)
+      sessions.delete(key)
     },
   })

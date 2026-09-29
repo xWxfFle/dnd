@@ -1,26 +1,26 @@
-import type { AttackDef, CharacterDto } from '@dnd/shared'
-import { isBloodied, isDeadFromExhaustion } from '@dnd/shared'
-import { Accordion, ActionIcon, Avatar, Button, FileButton, Group, NumberInput, Paper, Popover, Select, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
+import type { AttackDef, CharacterDto, SrdEntryDto, TokenDto } from '@dnd/shared'
+import { abilityModifier, isDeadFromExhaustion, readArmorClass } from '@dnd/shared'
+import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, CopyButton, Drawer, FileButton, Group, NumberInput, Paper, Select, Stack, Text, TextInput, Title } from '@mantine/core'
 import { IconMinus, IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
+import { useState } from 'react'
 import { MapBoard } from '@/features/table-map/board'
+import { AttackRoll } from '@/pages/table/attack-roll'
+import { readAttacks } from '@/pages/table/attacks'
 import { ClassKit } from '@/pages/table/class-kit'
-import { DiceTray } from '@/pages/table/dice-tray'
+import { CombatStrip, HpBar } from '@/pages/table/combat-strip'
+import { DiceLog, DiceTray } from '@/pages/table/dice-tray'
 import { liveSnapshot } from '@/pages/table/live'
 import { AccountMenu } from '@/shared/ui/account-menu'
 import {
-  attackRolled,
-  avatars,
   campaignsOpened,
+  catalogNames,
   cellSize,
   cellSizeChanged,
   characterOpened,
   characterPlacementToggled,
   columns,
   columnsChanged,
-  combatAdvanced,
-  combatEnded,
-  combatStarted,
   conditionNames,
   conditionToggled,
   confirmDelete,
@@ -35,13 +35,12 @@ import {
   mapFileChosen,
   mapName,
   mapNameChanged,
+  monsterCopies,
+  monsterCopiesChanged,
   monsterId,
   monsterPlaceRequested,
   monsters,
   monsterSelected,
-  notes,
-  notesChanged,
-  notesSaveRequested,
   portraitChosen,
   restRequested,
   roster,
@@ -54,14 +53,12 @@ import {
   sceneTokens,
   selectedMonster,
   sheets,
-  slotMarked,
   tokenHiddenToggled,
   tokenHpChanged,
   tokenMoved,
   tokenRemoved,
 } from './model'
-
-const sidePanel = { flex: 1, minHeight: 0, overflow: 'auto' } as const
+import { MonsterEdit } from './monster-edit'
 
 export function TablePage() {
   const state = useUnit({
@@ -69,39 +66,17 @@ export function TablePage() {
     scene,
     dm,
     monsters,
-    roster,
     sheets,
-    avatars,
     sceneTokens,
-    mapName,
-    confirmDelete,
-    monsterId,
-    notes,
-    columns,
-    rows,
-    cellSize,
-    mapNameChanged,
     sceneSelected,
-    sceneCreateRequested,
-    sceneDeletePressed,
-    gridPresetChosen,
-    columnsChanged,
-    rowsChanged,
-    cellSizeChanged,
-    gridApplyRequested,
-    notesChanged,
-    notesSaveRequested,
-    monsterSelected,
-    monsterPlaceRequested,
     campaignsOpened,
-    characterOpened,
-    combatStarted,
-    combatAdvanced,
-    combatEnded,
-    slotMarked,
     tokenMoved,
     fogUpdated,
   })
+  const [focusToken, setFocusToken] = useState<{ x: number, y: number, tick: number } | null>(null)
+  const [sheetId, setSheetId] = useState<string | null>(null)
+  const [tableOpen, setTableOpen] = useState(false)
+  const [diceOpen, setDiceOpen] = useState(false)
   if (!state.snapshot) {
     return (
       <Group justify="space-between" p="md">
@@ -113,78 +88,50 @@ export function TablePage() {
   const snapshot = state.snapshot
   const current = state.scene
   const invite = `${window.location.origin}/join/${snapshot.campaign.inviteCode}`
+  const openSheet = state.sheets.find(item => item.id === sheetId) ?? null
+  const openHero = (characterId: string) => {
+    setTableOpen(false)
+    setSheetId(characterId)
+  }
+  const openTable = () => {
+    setSheetId(null)
+    setTableOpen(true)
+  }
   return (
     <Stack p="sm" gap="sm" h="100vh" style={{ overflow: 'hidden' }}>
-      <Group justify="space-between">
-        <div>
-          <Title order={3}>{snapshot.campaign.name}</Title>
-          <Text size="sm" c="dimmed">{state.dm ? 'Мастер' : 'Игрок'}</Text>
-        </div>
-        <Group>
+      <Group justify="space-between" wrap="nowrap" gap="sm">
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <Button size="xs" variant="subtle" onClick={() => void state.campaignsOpened()}>Кампании</Button>
+          <Text size="sm" c="dimmed">/</Text>
+          <Title order={4} lineClamp={1}>{snapshot.campaign.name}</Title>
+          <Badge variant="light" size="sm">{state.dm ? 'Мастер' : 'Игрок'}</Badge>
+        </Group>
+        {state.dm
+          ? (
+              <Select
+                size="xs"
+                aria-label="Карта"
+                data={snapshot.scenes.map(item => ({ value: item.id, label: item.name }))}
+                value={current?.id ?? null}
+                onChange={(value) => {
+                  if (value)
+                    state.sceneSelected(value)
+                }}
+                allowDeselect={false}
+                w={180}
+              />
+            )
+          : <Text size="sm" lineClamp={1}>{current?.name ?? 'Нет сцены'}</Text>}
+        <Group gap="xs" wrap="nowrap">
+          <CopyButton value={invite}>
+            {({ copied, copy }) => (
+              <Button size="xs" variant="default" onClick={copy}>{copied ? 'Скопировано' : 'Ссылка'}</Button>
+            )}
+          </CopyButton>
+          {state.dm && <Button size="xs" variant="light" onClick={openTable}>Стол</Button>}
           <AccountMenu />
-          <Button size="sm" variant="default" onClick={() => void state.campaignsOpened()}>Кампании</Button>
-          <Button size="sm" variant="light" onClick={() => void state.characterOpened()}>Персонаж</Button>
         </Group>
       </Group>
-      <Text size="xs" c="dimmed">
-        {window.location.hostname === 'localhost'
-          ? `Приглашение: ${invite}. С localhost друзьям не зайти, нужен адрес из scripts/print-join-url.ps1 и код ${snapshot.campaign.inviteCode}.`
-          : `Приглашение: ${invite}`}
-      </Text>
-      {state.dm && (
-        <Group gap="xs" align="flex-end">
-          <Select
-            size="xs"
-            aria-label="Карта"
-            data={snapshot.scenes.map(item => ({ value: item.id, label: item.name }))}
-            value={current?.id ?? null}
-            onChange={(value) => {
-              if (value)
-                state.sceneSelected(value)
-            }}
-            allowDeselect={false}
-            w={180}
-          />
-          <TextInput
-            size="xs"
-            aria-label="Новая карта"
-            placeholder="Новая карта"
-            value={state.mapName}
-            onChange={event => state.mapNameChanged(event.currentTarget.value)}
-          />
-          <Button size="xs" disabled={state.mapName.trim().length === 0} onClick={() => void state.sceneCreateRequested()}>Создать</Button>
-          <Button size="xs" variant={state.confirmDelete ? 'filled' : 'default'} disabled={!current} onClick={() => void state.sceneDeletePressed()}>
-            {state.confirmDelete ? 'Точно удалить' : 'Удалить'}
-          </Button>
-          {current && (
-            <Popover width={260} position="bottom-end" shadow="md">
-              <Popover.Target>
-                <Button size="xs" variant="default">Размер поля</Button>
-              </Popover.Target>
-              <Popover.Dropdown>
-                <Stack gap="xs">
-                  <Group gap={6}>
-                    {fieldPresets.map(preset => (
-                      <Button
-                        key={preset.label}
-                        size="xs"
-                        variant={state.columns === preset.columns && state.rows === preset.rows && state.cellSize === preset.cellSize ? 'filled' : 'default'}
-                        onClick={() => state.gridPresetChosen(preset)}
-                      >
-                        {preset.label}
-                      </Button>
-                    ))}
-                  </Group>
-                  <NumberInput size="xs" label="Колонки" min={1} max={200} allowDecimal={false} value={state.columns} onChange={state.columnsChanged} />
-                  <NumberInput size="xs" label="Ряды" min={1} max={200} allowDecimal={false} value={state.rows} onChange={state.rowsChanged} />
-                  <NumberInput size="xs" label="Клетка, px" min={8} max={256} allowDecimal={false} value={state.cellSize} onChange={state.cellSizeChanged} />
-                  <Button size="xs" onClick={() => void state.gridApplyRequested()}>Применить</Button>
-                </Stack>
-              </Popover.Dropdown>
-            </Popover>
-          )}
-        </Group>
-      )}
       <Group align="stretch" wrap="nowrap" gap="sm" style={{ flex: 1, minHeight: 0 }}>
         <Paper withBorder p={0} style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
           <div style={{ position: 'absolute', inset: 8 }}>
@@ -194,7 +141,7 @@ export function TablePage() {
                     scene={current}
                     tokens={state.sceneTokens}
                     dm={state.dm}
-                    avatars={state.avatars}
+                    focusToken={focusToken}
                     onTokenMoved={state.tokenMoved}
                     onFogUpdated={fog => void state.fogUpdated({ sceneId: current.id, fog })}
                   />
@@ -202,130 +149,181 @@ export function TablePage() {
               : <Text>Нет сцены</Text>}
           </div>
         </Paper>
-        <Tabs
-          defaultValue={state.sheets.length > 0 ? 'sheet' : 'combat'}
-          style={{ width: 420, flex: 'none', minHeight: 0, display: 'flex', flexDirection: 'column' }}
-        >
-          <Tabs.List grow>
-            <Tabs.Tab value="combat">Бой</Tabs.Tab>
-            <Tabs.Tab value="dice">Кости</Tabs.Tab>
-            {state.sheets.length > 0 && <Tabs.Tab value="sheet">Лист</Tabs.Tab>}
-            {state.dm && <Tabs.Tab value="table">Стол</Tabs.Tab>}
-          </Tabs.List>
-          <Tabs.Panel value="combat" pt="sm" style={sidePanel}>
+        <Stack gap="sm" w={420} h="100%" style={{ flex: 'none', minHeight: 0, overflow: 'hidden' }}>
+          <Paper withBorder p="sm" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             <Stack gap="sm">
-              {snapshot.combat
-                ? snapshot.combat.combatants.map((combatant, index) => (
-                    <Stack key={combatant.id} gap={0}>
-                      <Text size="sm" fw={index === snapshot.combat?.activeIndex ? 700 : 500}>
-                        {`${combatant.initiative}. ${combatant.name}`}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        {`${combatant.hpCurrent}/${combatant.hpMax}${combatant.slotSpentThisTurn ? ' · ячейка потрачена' : ''}`}
-                      </Text>
-                    </Stack>
-                  ))
-                : <Text size="sm" c="dimmed">Бой не начат</Text>}
-              {snapshot.combat && (
-                <Button
-                  size="xs"
-                  variant="light"
-                  disabled={snapshot.combat.combatants[snapshot.combat.activeIndex]?.slotSpentThisTurn}
-                  onClick={() => void state.slotMarked()}
-                >
-                  Ячейка за ход
-                </Button>
-              )}
-              {state.dm && current && (
-                <Group gap="xs">
-                  <Button size="xs" variant={snapshot.combat ? 'light' : 'filled'} onClick={() => void state.combatStarted()}>Начать</Button>
-                  <Button size="xs" variant={snapshot.combat ? 'filled' : 'default'} disabled={!snapshot.combat} onClick={() => void state.combatAdvanced()}>Дальше</Button>
-                  <Button size="xs" variant="default" disabled={!snapshot.combat} onClick={() => void state.combatEnded()}>Конец</Button>
-                </Group>
-              )}
+              <SheetList sheets={state.sheets} onOpen={openHero} />
+              <CombatStrip
+                combat={snapshot.combat}
+                dm={state.dm}
+                tokens={state.sceneTokens}
+                monsters={state.monsters}
+                characters={snapshot.characters}
+                onOpenSheet={openHero}
+                onFocus={(id) => {
+                  const token = state.sceneTokens.find(item => item.id === id)
+                  if (!token)
+                    return
+                  setFocusToken({ x: token.x, y: token.y, tick: Date.now() })
+                }}
+              />
             </Stack>
-          </Tabs.Panel>
-          <Tabs.Panel value="dice" pt="sm" style={sidePanel}>
-            <DiceTray />
-          </Tabs.Panel>
-          {state.sheets.length > 0 && (
-            <Tabs.Panel value="sheet" pt="sm" style={sidePanel}>
-              <Stack gap="sm">
-                {state.sheets.length === 1
-                  ? (
-                      <CharacterSheet
-                        sheet={state.sheets[0]}
-                        onMap={state.sceneTokens.some(token => token.characterId === state.sheets[0].id)}
-                        sceneReady={Boolean(current)}
-                      />
-                    )
-                  : (
-                      <Accordion variant="separated" defaultValue={state.sheets[0].id}>
-                        {state.sheets.map(character => (
-                          <Accordion.Item key={character.id} value={character.id}>
-                            <Accordion.Control>
-                              {`${character.name} · ${character.hpCurrent}/${character.hpMax}`}
-                            </Accordion.Control>
-                            <Accordion.Panel>
-                              <CharacterSheet
-                                sheet={character}
-                                onMap={state.sceneTokens.some(token => token.characterId === character.id)}
-                                sceneReady={Boolean(current)}
-                              />
-                            </Accordion.Panel>
-                          </Accordion.Item>
-                        ))}
-                      </Accordion>
-                    )}
-              </Stack>
-            </Tabs.Panel>
-          )}
-          {state.dm && (
-            <Tabs.Panel value="table" pt="sm" style={sidePanel}>
-              <Stack gap="md">
-                {state.roster.length > 0 && (
-                  <Stack gap="sm">
-                    <Text fw={700}>Персонажи</Text>
-                    {state.roster.map(character => (
-                      <CharacterPlace
-                        key={character.id}
-                        character={character}
-                        placed={state.sceneTokens.some(token => token.characterId === character.id)}
-                        sceneReady={Boolean(current)}
-                      />
-                    ))}
-                  </Stack>
-                )}
-                {current && (
-                  <Stack gap="sm">
-                    <Text fw={700}>Монстры</Text>
-                    <Select
-                      aria-label="Поиск монстра"
-                      placeholder="Поиск"
-                      searchable
-                      nothingFoundMessage="Нет такого монстра"
-                      data={state.monsters.map(monster => ({ value: monster.id, label: monster.name }))}
-                      value={state.monsterId}
-                      onChange={value => value && state.monsterSelected(value)}
-                      allowDeselect={false}
-                    />
-                    <Button size="xs" variant="light" onClick={() => void state.monsterPlaceRequested()}>На карту</Button>
-                    <MonsterActions />
-                    {state.sceneTokens.map(token => (
-                      <TokenRow key={token.id} token={token} />
-                    ))}
-                    <Textarea label="Заметки мастера" value={state.notes} onChange={event => state.notesChanged(event.currentTarget.value)} minRows={3} />
-                    <Group gap="xs">
-                      <Button size="xs" variant="light" onClick={() => void state.notesSaveRequested()}>Сохранить заметки</Button>
-                      <MapUpload />
-                    </Group>
-                  </Stack>
-                )}
-              </Stack>
-            </Tabs.Panel>
-          )}
-        </Tabs>
+          </Paper>
+          <Paper withBorder p="sm" style={{ flex: 'none', maxHeight: '46%', overflow: 'auto' }}>
+            <Stack gap="xs">
+              <DiceLog />
+              <Button size="xs" variant="subtle" onClick={() => setDiceOpen(open => !open)}>
+                {diceOpen ? 'Скрыть бросок' : 'Бросок'}
+              </Button>
+              <Collapse expanded={diceOpen}>
+                <DiceTray />
+              </Collapse>
+            </Stack>
+          </Paper>
+        </Stack>
       </Group>
+      <Drawer opened={tableOpen} onClose={() => setTableOpen(false)} position="right" title="Стол" size={420} padding="md">
+        <TableSetup />
+      </Drawer>
+      <Drawer opened={openSheet != null} onClose={() => setSheetId(null)} position="right" title="Лист" size={420} padding="md">
+        {state.sheets.length > 1 && (
+          <Select
+            mb="sm"
+            size="xs"
+            aria-label="Герой"
+            data={state.sheets.map(item => ({ value: item.id, label: item.name }))}
+            value={openSheet?.id ?? null}
+            onChange={setSheetId}
+            allowDeselect={false}
+          />
+        )}
+        {openSheet && (
+          <CharacterSheet
+            sheet={openSheet}
+            onMap={state.sceneTokens.some(token => token.characterId === openSheet.id)}
+            sceneReady={Boolean(current)}
+          />
+        )}
+      </Drawer>
+    </Stack>
+  )
+}
+
+function SheetList(props: { sheets: CharacterDto[], onOpen: (characterId: string) => void }) {
+  if (props.sheets.length === 0)
+    return null
+  return (
+    <Stack gap={4}>
+      {props.sheets.map(sheet => (
+        <Button key={sheet.id} size="xs" variant="subtle" fullWidth onClick={() => props.onOpen(sheet.id)}>
+          {`${sheet.name} · ${sheet.hpCurrent}/${sheet.hpMax}`}
+        </Button>
+      ))}
+    </Stack>
+  )
+}
+
+function TableSetup() {
+  const state = useUnit({
+    scene,
+    roster,
+    sceneTokens,
+    monsters,
+    mapName,
+    confirmDelete,
+    monsterId,
+    columns,
+    rows,
+    cellSize,
+    mapNameChanged,
+    sceneCreateRequested,
+    sceneDeletePressed,
+    gridPresetChosen,
+    columnsChanged,
+    rowsChanged,
+    cellSizeChanged,
+    gridApplyRequested,
+    monsterSelected,
+    characterOpened,
+  })
+  const current = state.scene
+  return (
+    <Stack gap="md">
+      <Stack gap="xs">
+        <Text fw={700}>Сцена</Text>
+        <TextInput
+          size="xs"
+          aria-label="Новая карта"
+          placeholder="Новая карта"
+          value={state.mapName}
+          onChange={event => state.mapNameChanged(event.currentTarget.value)}
+        />
+        <Group gap="xs">
+          <Button size="xs" disabled={state.mapName.trim().length === 0} onClick={() => void state.sceneCreateRequested()}>Создать</Button>
+          <Button size="xs" variant={state.confirmDelete ? 'filled' : 'default'} disabled={!current} onClick={() => void state.sceneDeletePressed()}>
+            {state.confirmDelete ? 'Точно удалить' : 'Удалить'}
+          </Button>
+        </Group>
+      </Stack>
+      {current && (
+        <Stack gap="xs">
+          <Text fw={700}>Размер поля</Text>
+          <Group gap={6}>
+            {fieldPresets.map(preset => (
+              <Button
+                key={preset.label}
+                size="xs"
+                variant={state.columns === preset.columns && state.rows === preset.rows && state.cellSize === preset.cellSize ? 'filled' : 'default'}
+                onClick={() => state.gridPresetChosen(preset)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </Group>
+          <NumberInput size="xs" label="Колонки" min={1} max={200} allowDecimal={false} value={state.columns} onChange={state.columnsChanged} />
+          <NumberInput size="xs" label="Ряды" min={1} max={200} allowDecimal={false} value={state.rows} onChange={state.rowsChanged} />
+          <NumberInput size="xs" label="Клетка, px" min={8} max={256} allowDecimal={false} value={state.cellSize} onChange={state.cellSizeChanged} />
+          <Button size="xs" onClick={() => void state.gridApplyRequested()}>Применить</Button>
+        </Stack>
+      )}
+      <Stack gap="sm">
+        <Group justify="space-between">
+          <Text fw={700}>Герои</Text>
+          <Button size="xs" variant="light" onClick={() => void state.characterOpened()}>Новый</Button>
+        </Group>
+        {state.roster.map(character => (
+          <CharacterPlace
+            key={character.id}
+            character={character}
+            placed={state.sceneTokens.some(token => token.characterId === character.id)}
+            sceneReady={Boolean(current)}
+          />
+        ))}
+      </Stack>
+      {current && (
+        <Stack gap="sm">
+          <Text fw={700}>Монстры</Text>
+          <Select
+            aria-label="Поиск монстра"
+            placeholder="Поиск"
+            searchable
+            nothingFoundMessage="Нет такого монстра"
+            data={state.monsters.map(monster => ({ value: monster.id, label: monster.name }))}
+            value={state.monsterId}
+            onChange={value => value && state.monsterSelected(value)}
+            allowDeselect={false}
+          />
+          <MonsterStat />
+          {state.sceneTokens.map(token => (
+            <TokenRow
+              key={token.id}
+              token={token}
+              monster={state.monsters.find(item => item.id === token.monsterId) ?? null}
+            />
+          ))}
+          <MapUpload />
+        </Stack>
+      )}
     </Stack>
   )
 }
@@ -349,9 +347,10 @@ function CharacterPlace(props: { character: CharacterDto, placed: boolean, scene
 }
 
 function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady: boolean }) {
-  const { toggle, rest } = useUnit({
+  const { toggle, rest, catalog } = useUnit({
     toggle: characterPlacementToggled,
     rest: restRequested,
+    catalog: catalogNames,
   })
   const sheet = props.sheet
   return (
@@ -360,11 +359,12 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
         <Avatar src={sheet.avatarUrl ?? undefined} alt="" size="lg" radius="xl" />
         <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
           <Text fw={700}>{sheet.name}</Text>
-          <Text size="sm">{`Хиты ${sheet.hpCurrent}/${sheet.hpMax}${isBloodied(sheet.hpCurrent, sheet.hpMax) ? ' · кровь' : ''}`}</Text>
-          <Text size="sm">{`КД ${sheet.ac} · истощение ${sheet.exhaustion}${sheet.heroicInspiration ? ' · вдохновение' : ''}`}</Text>
-          <Text size="sm">{`Смерть ${sheet.deathSaves.successes}/3 и ${sheet.deathSaves.failures}/3`}</Text>
+          <Text size="sm">{sheetTitle(sheet, catalog)}</Text>
+          <Text size="sm">{`КД ${sheet.ac} · ${sheet.speed} фт · истощение ${sheet.exhaustion}${sheet.heroicInspiration ? ' · вдохновение' : ''}`}</Text>
         </Stack>
       </Group>
+      <AbilityScores abilities={sheet.abilities} />
+      <HpBar current={sheet.hpCurrent} max={sheet.hpMax} temp={sheet.hpTemp} />
       <Group gap="xs">
         <Button size="xs" variant={props.onMap ? 'default' : 'light'} disabled={!props.sceneReady} onClick={() => toggle(sheet.id)}>
           {props.onMap ? 'Убрать с карты' : 'На карту'}
@@ -376,7 +376,15 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
           <AttackRoll key={attack.id} attack={attack} exhaustion={sheet.exhaustion} />
         ))}
       </Stack>
-      <ClassKit sheet={sheet} />
+      <SlotPips slots={sheet.slots} />
+      <Accordion variant="contained">
+        <Accordion.Item value="kit">
+          <Accordion.Control>Умения и заклинания</Accordion.Control>
+          <Accordion.Panel>
+            <ClassKit sheet={sheet} />
+          </Accordion.Panel>
+        </Accordion.Item>
+      </Accordion>
       <SheetTrackers sheet={sheet} />
       <Group gap="xs">
         <Button size="xs" variant="light" onClick={() => rest({ characterId: sheet.id, kind: 'short' })}>Короткий отдых</Button>
@@ -386,28 +394,41 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
   )
 }
 
-function AttackRoll(props: { attack: AttackDef, exhaustion?: number }) {
-  const roll = useUnit(attackRolled)
-  const save = /сл\s*\d+/i.test(props.attack.damageType)
-  const damage = props.attack.damageDice.includes('d')
+const abilityLabel = {
+  str: 'Сил',
+  dex: 'Лов',
+  con: 'Тел',
+  int: 'Инт',
+  wis: 'Мдр',
+  cha: 'Хар',
+} as const satisfies Record<keyof CharacterDto['abilities'], string>
+
+const abilityOrder = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
+
+function sheetTitle(sheet: CharacterDto, catalog: Record<string, string>) {
+  const klass = catalog[sheet.classId] ?? 'Герой'
+  const species = catalog[sheet.speciesId]
+  return species ? `${klass} ${sheet.level} · ${species}` : `${klass} ${sheet.level}`
+}
+
+function modifierText(score: number) {
+  const mod = abilityModifier(score)
+  if (mod > 0)
+    return `+${mod}`
+  return String(mod)
+}
+
+function AbilityScores(props: { abilities: CharacterDto['abilities'] }) {
   return (
-    <Stack gap={6}>
-      <Text size="sm" fw={600}>{props.attack.name}</Text>
-      <Group gap="xs">
-        {props.attack.attackBonus > 0 && (
-          <Button size="xs" variant="light" onClick={() => roll({ attack: props.attack, kind: 'attack', exhaustion: props.exhaustion ?? 0 })}>Атака</Button>
-        )}
-        {save && (
-          <Button size="xs" variant="default" onClick={() => roll({ attack: props.attack, kind: 'save', exhaustion: props.exhaustion ?? 0 })}>Спасбросок</Button>
-        )}
-        {damage && (
-          <>
-            <Button size="xs" variant="light" onClick={() => roll({ attack: props.attack, kind: 'damage' })}>Урон</Button>
-            <Button size="xs" variant="default" onClick={() => roll({ attack: props.attack, kind: 'crit' })}>Крит</Button>
-          </>
-        )}
-      </Group>
-    </Stack>
+    <Group gap="xs" grow>
+      {abilityOrder.map(key => (
+        <Stack key={key} gap={0} align="center">
+          <Text size="xs" c="dimmed">{abilityLabel[key]}</Text>
+          <Text size="sm" fw={700}>{modifierText(props.abilities[key])}</Text>
+          <Text size="xs">{String(props.abilities[key])}</Text>
+        </Stack>
+      ))}
+    </Group>
   )
 }
 
@@ -426,9 +447,21 @@ function SheetTrackers(props: { sheet: CharacterDto }) {
         <Button size="xs" variant="default" onClick={() => exhaust({ characterId: props.sheet.id, delta: 1 })}>Истощение +</Button>
       </Group>
       {isDeadFromExhaustion(props.sheet.exhaustion) && <Text size="sm">Истощение 10: персонаж мёртв</Text>}
-      <Group gap="xs">
-        <Button size="xs" variant="light" onClick={() => death({ characterId: props.sheet.id, kind: 'successes' })}>Успех смерти</Button>
-        <Button size="xs" variant="default" onClick={() => death({ characterId: props.sheet.id, kind: 'failures' })}>Провал смерти</Button>
+      <Group gap="xs" align="center">
+        <Text size="xs">Успехи</Text>
+        <SavePips
+          filled={props.sheet.deathSaves.successes}
+          label="Успех смерти"
+          color="teal"
+          onAdd={() => death({ characterId: props.sheet.id, kind: 'successes' })}
+        />
+        <Text size="xs">Провалы</Text>
+        <SavePips
+          filled={props.sheet.deathSaves.failures}
+          label="Провал смерти"
+          color="red"
+          onAdd={() => death({ characterId: props.sheet.id, kind: 'failures' })}
+        />
       </Group>
       <Group gap="xs">
         {conditionNames.map(name => (
@@ -446,17 +479,101 @@ function SheetTrackers(props: { sheet: CharacterDto }) {
   )
 }
 
-function MonsterActions() {
-  const monster = useUnit(selectedMonster)
-  const attacks = Array.isArray(monster?.body.attacks) ? monster.body.attacks as AttackDef[] : []
+function SavePips(props: { filled: number, label: string, color: string, onAdd: () => void }) {
   return (
-    <Stack gap={4} my="xs">
-      {attacks.map(attack => <AttackRoll key={attack.id} attack={attack} />)}
+    <Group gap={4}>
+      {Array.from({ length: 3 }, (_, index) => {
+        const marked = index < props.filled
+        const next = index === props.filled
+        return (
+          <ActionIcon
+            key={index}
+            size="sm"
+            variant={marked ? 'filled' : 'default'}
+            color={marked ? props.color : undefined}
+            aria-label={props.label}
+            disabled={!marked && !next}
+            onClick={next ? props.onAdd : undefined}
+          />
+        )
+      })}
+    </Group>
+  )
+}
+
+function SlotPips(props: { slots: CharacterDto['slots'] }) {
+  if (props.slots.length === 0)
+    return null
+  return (
+    <Stack gap={4}>
+      <Text size="xs">Ячейки</Text>
+      {props.slots.map(slot => (
+        <Group key={slot.level} gap={4} align="center">
+          <Text size="xs" w={12}>{String(slot.level)}</Text>
+          {Array.from({ length: slot.max }, (_, index) => (
+            <Box
+              key={index}
+              w={12}
+              h={12}
+              bg={index < slot.max - slot.spent ? 'blue.6' : 'dark.4'}
+              style={{ borderRadius: 99 }}
+            />
+          ))}
+        </Group>
+      ))}
     </Stack>
   )
 }
 
-function TokenRow(props: { token: { id: string, name: string, hpCurrent: number, hpMax: number, hidden: boolean } }) {
+function MonsterStat() {
+  const { monster, copies, changeCopies, place } = useUnit({
+    monster: selectedMonster,
+    copies: monsterCopies,
+    changeCopies: monsterCopiesChanged,
+    place: monsterPlaceRequested,
+  })
+  if (!monster)
+    return null
+  const ac = readArmorClass(monster.body)
+  const hp = typeof monster.body.hp === 'number' ? monster.body.hp : null
+  const speed = typeof monster.body.speed === 'number' ? monster.body.speed : null
+  const attacks = readAttacks(monster.body)
+  return (
+    <Stack gap={6}>
+      <Text size="sm">{statLine(ac, hp, speed)}</Text>
+      {attacks.map(attack => (
+        <Text key={attack.id} size="xs">{attackLine(attack)}</Text>
+      ))}
+      <NumberInput size="xs" label="Сколько" min={1} max={12} allowDecimal={false} value={copies} onChange={changeCopies} />
+      <Button size="xs" variant="light" onClick={() => void place()}>На карту</Button>
+    </Stack>
+  )
+}
+
+function statLine(ac: number | null, hp: number | null, speed: number | null) {
+  const parts = [
+    ac == null ? '' : `КД ${ac}`,
+    hp == null ? '' : `${hp} хитов`,
+    speed == null ? '' : `${speed} фт`,
+  ].filter(part => part.length > 0)
+  return parts.join(' · ')
+}
+
+function attackLine(attack: AttackDef) {
+  if (attack.attackBonus <= 0)
+    return `${attack.name}: ${attack.damageType}`
+  return `${attack.name} +${attack.attackBonus}, ${attack.damageDice}${damageExtra(attack.damageBonus)} ${attack.damageType}`
+}
+
+function damageExtra(bonus: number) {
+  if (bonus > 0)
+    return `+${bonus}`
+  if (bonus < 0)
+    return String(bonus)
+  return ''
+}
+
+function TokenRow(props: { token: TokenDto, monster: SrdEntryDto | null }) {
   const { changeHp, toggleHidden, remove } = useUnit({
     changeHp: tokenHpChanged,
     toggleHidden: tokenHiddenToggled,
@@ -480,6 +597,7 @@ function TokenRow(props: { token: { id: string, name: string, hpCurrent: number,
           <IconTrash size={14} />
         </ActionIcon>
       </Group>
+      {token.characterId == null && <MonsterEdit token={token} monster={props.monster} />}
     </Stack>
   )
 }

@@ -15,6 +15,13 @@
       "when": 1790553600000,
       "tag": "0001_avatar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790557200000,
+      "tag": "0002_token_stats",
+      "breakpoints": true
     }
   ]
 }

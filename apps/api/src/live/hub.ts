@@ -1,6 +1,6 @@
 import type { CampaignRole } from '@dnd/shared'
-import { rollRequestSchema } from '@dnd/shared'
-import { advanceCombat, changeTokenHp, deleteToken, endCombat, moveToken, replaceFog, setTokenHidden, spendSlot, startCombat } from '../lib/combat'
+import { rollRequestSchema, strikeRequestSchema } from '@dnd/shared'
+import { advanceCombat, changeTokenHp, deleteToken, endCombat, moveToken, replaceFog, resolveStrike, setTokenHidden, spendSlot, startCombat } from '../lib/combat'
 import { buildSnapshot, recordRoll } from '../lib/table'
 
 interface Client {
@@ -56,6 +56,18 @@ export async function handleLiveMessage(client: Client, raw: unknown) {
   }
   else if (type === 'hp' && typeof message.tokenId === 'string') {
     await changeTokenHp(message.tokenId, Number(message.delta))
+  }
+  else if (type === 'strike') {
+    const parsed = strikeRequestSchema.safeParse(message)
+    if (!parsed.success) {
+      client.send({ type: 'error', error: 'Некого атаковать' })
+      return
+    }
+    const strike = await resolveStrike({ ...parsed.data, campaignId: client.campaignId, userId: client.userId })
+    if (!strike.ok) {
+      client.send({ type: 'error', error: strike.error })
+      return
+    }
   }
   else if (type === 'fog' && typeof message.sceneId === 'string') {
     await replaceFog(message.sceneId, message.fog)

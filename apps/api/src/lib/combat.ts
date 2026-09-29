@@ -1,7 +1,36 @@
+import type { AttackDef } from '@dnd/shared'
+import { readArmorClass, resolveAttack, srdCatalog } from '@dnd/shared'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db'
-import { combatants, combats, scenes, tokens } from '../db/schema'
-import { loadCombat } from './table'
+import { characters, combatants, combats, scenes, tokens } from '../db/schema'
+import { loadCombat, saveRoll } from './table'
+
+export async function updateTokenStats(tokenId: string, patch: {
+  name: string
+  hpMax: number
+  ac: number
+  speed: number
+  attacks: AttackDef[]
+}) {
+  const [current] = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1)
+  if (!current)
+    return null
+  const hpCurrent = Math.min(current.hpCurrent, patch.hpMax)
+  const [row] = await db.update(tokens).set({
+    name: patch.name,
+    hpMax: patch.hpMax,
+    hpCurrent,
+    ac: patch.ac,
+    speed: patch.speed,
+    attacks: patch.attacks,
+  }).where(eq(tokens.id, tokenId)).returning()
+  await db.update(combatants).set({
+    name: row.name,
+    hpCurrent: row.hpCurrent,
+    hpMax: row.hpMax,
+  }).where(eq(combatants.tokenId, tokenId))
+  return row
+}
 
 export async function moveToken(tokenId: string, x: number, y: number) {
   const [row] = await db.update(tokens).set({ x, y }).where(eq(tokens.id, tokenId)).returning()
@@ -13,11 +42,117 @@ export async function changeTokenHp(tokenId: string, delta: number) {
   if (!current)
     return null
   const hpCurrent = Math.max(0, current.hpCurrent + delta)
-  const [row] = await db.update(tokens).set({ hpCurrent }).where(eq(tokens.id, tokenId)).returning()
-  if (row) {
-    await db.update(combatants).set({ hpCurrent }).where(eq(combatants.tokenId, tokenId))
+  await writeHp(tokenId, current.characterId, hpCurrent)
+  return { ...current, hpCurrent }
+}
+
+const strikeVerdict = {
+  miss: () => 'промах',
+  hit: (damage: number) => `попадание, снято ${damage}`,
+  crit: (damage: number) => `крит, снято ${damage}`,
+} as const satisfies Record<'miss' | 'hit' | 'crit', (damage: number) => string>
+
+export async function resolveStrike(input: {
+  campaignId: string
+  userId: string
+  attack: AttackDef
+  attackerTokenId: string
+  targetTokenId: string
+}) {
+  const target = await tokenInCampaign(input.targetTokenId, input.campaignId)
+  const attacker = await tokenInCampaign(input.attackerTokenId, input.campaignId)
+  if (!target || !attacker)
+    return { ok: false as const, error: 'Цели нет на карте' }
+  const armorClass = await armorOf(target)
+  if (armorClass == null)
+    return { ok: false as const, error: 'У цели нет класса доспеха' }
+  const exhaustion = attacker.characterId ? await exhaustionOf(attacker.characterId) : 0
+  const strike = resolveAttack({ attack: input.attack, armorClass, exhaustion })
+  if (strike.hit)
+    await applyDamage(target.id, target.characterId, strike.damage)
+  const verdict = strikeVerdict[verdictKind(strike.hit, strike.critical)](strike.damage)
+  await saveRoll({
+    campaignId: input.campaignId,
+    userId: input.userId,
+    label: `${input.attack.name} → ${target.name}: ${verdict}`,
+    formula: attackFormula(input.attack.attackBonus),
+    mode: 'normal',
+    rolls: strike.attack.rolls,
+    total: strike.attack.total,
+  })
+  return { ok: true as const }
+}
+
+function attackFormula(bonus: number) {
+  if (bonus === 0)
+    return '1d20'
+  if (bonus > 0)
+    return `1d20+${bonus}`
+  return `1d20${bonus}`
+}
+
+function verdictKind(hit: boolean, critical: boolean) {
+  if (!hit)
+    return 'miss' as const
+  if (critical)
+    return 'crit' as const
+  return 'hit' as const
+}
+
+async function tokenInCampaign(tokenId: string, campaignId: string) {
+  const [token] = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1)
+  if (!token)
+    return null
+  const [scene] = await db.select().from(scenes).where(eq(scenes.id, token.sceneId)).limit(1)
+  if (!scene || scene.campaignId !== campaignId)
+    return null
+  return token
+}
+
+async function armorOf(token: { characterId: string | null, monsterId: string | null, name: string, ac: number | null }) {
+  if (token.characterId) {
+    const [sheet] = await db.select().from(characters).where(eq(characters.id, token.characterId)).limit(1)
+    return sheet?.ac ?? null
   }
-  return row ?? null
+  if (token.ac != null)
+    return token.ac
+  const monster = srdCatalog.find(entry => entry.id === token.monsterId)
+    ?? srdCatalog.find(entry => entry.kind === 'monster' && entry.name === token.name)
+  return readArmorClass(monster?.body)
+}
+
+async function exhaustionOf(characterId: string) {
+  const [sheet] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1)
+  return sheet?.exhaustion ?? 0
+}
+
+async function applyDamage(tokenId: string, characterId: string | null, amount: number) {
+  const [token] = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1)
+  if (!token)
+    return
+  let left = Math.max(0, amount)
+  let hpCurrent = token.hpCurrent
+  if (characterId) {
+    const [sheet] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1)
+    if (sheet) {
+      const absorbed = Math.min(sheet.hpTemp, left)
+      left -= absorbed
+      hpCurrent = Math.max(0, sheet.hpCurrent - left)
+      await db.update(characters).set({ hpCurrent, hpTemp: sheet.hpTemp - absorbed }).where(eq(characters.id, characterId))
+      await db.update(tokens).set({ hpCurrent }).where(eq(tokens.id, tokenId))
+      await db.update(combatants).set({ hpCurrent }).where(eq(combatants.tokenId, tokenId))
+      return
+    }
+  }
+  hpCurrent = Math.max(0, token.hpCurrent - left)
+  await writeHp(tokenId, null, hpCurrent)
+}
+
+async function writeHp(tokenId: string, characterId: string | null, hpCurrent: number) {
+  await db.update(tokens).set({ hpCurrent }).where(eq(tokens.id, tokenId))
+  await db.update(combatants).set({ hpCurrent }).where(eq(combatants.tokenId, tokenId))
+  if (characterId)
+    await db.update(characters).set({ hpCurrent }).where(eq(characters.id, characterId))
 }
 
 export async function deleteToken(tokenId: string) {

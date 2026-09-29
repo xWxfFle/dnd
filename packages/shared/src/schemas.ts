@@ -131,6 +131,13 @@ export const restSchema = z.object({
   kind: z.enum(['short', 'long']),
 })
 
+export const strikeRequestSchema = z.object({
+  type: z.literal('strike'),
+  attack: attackSchema,
+  attackerTokenId: z.uuid(),
+  targetTokenId: z.uuid(),
+})
+
 export const rollRequestSchema = z.object({
   label: z.string().min(1).max(120),
   formula: z.string().min(1).max(80),
@@ -198,6 +205,11 @@ export const tokenSchema = z.object({
   characterId: z.uuid().nullable(),
   monsterId: z.string().nullable(),
   color: z.string(),
+  ac: z.number().int().nullable(),
+  speed: z.number().int().nullable(),
+  attacks: z.array(attackSchema),
+  imageUrl: z.string().nullable(),
+  obscured: z.boolean(),
 })
 
 export const createTokenSchema = z.object({
@@ -211,6 +223,17 @@ export const createTokenSchema = z.object({
   characterId: z.uuid().nullable().optional(),
   monsterId: z.string().nullable().optional(),
   color: z.string().default('#5c4d7a'),
+  ac: z.number().int().min(0).max(40).nullable().optional(),
+  speed: z.number().int().min(0).max(200).nullable().optional(),
+  attacks: z.array(attackSchema).max(8).optional(),
+})
+
+export const updateTokenSchema = z.object({
+  name: z.string().min(1).max(80),
+  hpMax: z.number().int().min(1).max(999),
+  ac: z.number().int().min(0).max(40),
+  speed: z.number().int().min(0).max(200),
+  attacks: z.array(attackSchema).max(8),
 })
 
 export const moveTokenSchema = z.object({

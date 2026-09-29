@@ -31,4 +31,6 @@ export const publicSceneParams = z.object({ sceneId: z.uuid() })
 
 export const publicCharacterParams = z.object({ characterId: z.uuid() })
 
+export const publicTokenParams = z.object({ tokenId: z.uuid() })
+
 export const imageBody = z.object({ file: z.file() })

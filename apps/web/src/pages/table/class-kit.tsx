@@ -41,11 +41,6 @@ export function ClassKit(props: { sheet: CharacterDto }) {
           </Button>
         </Stack>
       ))}
-      {props.sheet.slots.map(slot => (
-        <Text key={slot.level} size="sm">
-          {`Ячейки ${slot.level}: ${slot.max - slot.spent}/${slot.max}`}
-        </Text>
-      ))}
       {message ? <Text size="xs" c="red">{message}</Text> : null}
     </Stack>
   )

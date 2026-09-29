@@ -1,10 +1,10 @@
-import { createSceneSchema, createTokenSchema, fogPolygonSchema, hpSchema, moveTokenSchema, updateSceneSchema } from '@dnd/shared'
+import { createSceneSchema, createTokenSchema, fogPolygonSchema, hpSchema, moveTokenSchema, updateSceneSchema, updateTokenSchema } from '@dnd/shared'
 import { eq } from 'drizzle-orm'
 import { status } from 'elysia'
 import { z } from 'zod'
 import { db } from '../../db'
 import { characters, scenes, tokens } from '../../db/schema'
-import { activateScene, changeTokenHp, deleteScene, endCombat, moveToken, placeCharacterToken, removeCharacterToken, replaceFog, setTokenHidden, startCombat } from '../../lib/combat'
+import { activateScene, changeTokenHp, deleteScene, endCombat, moveToken, placeCharacterToken, removeCharacterToken, replaceFog, setTokenHidden, startCombat, updateTokenStats } from '../../lib/combat'
 import { toSceneDto, toTokenDto } from '../../lib/table'
 import { rejectUnlessImage, uploadName, writeUpload } from '../../lib/uploads'
 import { broadcast } from '../../live/hub'
@@ -123,6 +123,9 @@ export const scenesModule = campaignRoutes('campaign-scenes')
       characterId: body.characterId ?? null,
       monsterId: body.monsterId ?? null,
       color: body.color,
+      ac: body.ac ?? null,
+      speed: body.speed ?? null,
+      attacks: body.attacks ?? [],
     }).returning()
     await broadcast(params.id)
     return toTokenDto(token)
@@ -130,6 +133,33 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     dm: dmOnly,
     params: sceneParams,
     body: createTokenSchema,
+  })
+  .patch('/:id/tokens/:tokenId', async ({ params, body }) => {
+    const token = await updateTokenStats(params.tokenId, body)
+    if (!token)
+      return status(404, { error: 'Not found' })
+    await broadcast(params.id)
+    return toTokenDto(token)
+  }, {
+    dm: dmOnly,
+    params: tokenParams,
+    body: updateTokenSchema,
+  })
+  .post('/:id/tokens/:tokenId/image', async ({ params, body }) => {
+    const rejected = await rejectUnlessImage(body.file, 'Нужна картинка')
+    if (rejected)
+      return rejected
+    const [current] = await db.select().from(tokens).where(eq(tokens.id, params.tokenId)).limit(1)
+    if (!current)
+      return status(404, { error: 'Not found' })
+    const storagePath = await writeUpload(`token-${params.tokenId}-${uploadName(body.file.name)}`, body.file)
+    const [token] = await db.update(tokens).set({ imagePath: storagePath }).where(eq(tokens.id, params.tokenId)).returning()
+    await broadcast(params.id)
+    return toTokenDto(token)
+  }, {
+    dm: dmOnly,
+    params: tokenParams,
+    body: imageBody,
   })
   .post('/:id/tokens/:tokenId/move', async ({ params, body }) => {
     const token = await moveToken(params.tokenId, body.x, body.y)

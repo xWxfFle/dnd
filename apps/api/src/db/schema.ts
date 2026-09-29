@@ -100,6 +100,10 @@ export const tokens = pgTable('tokens', {
   characterId: uuid('character_id').references(() => characters.id, { onDelete: 'set null' }),
   monsterId: text('monster_id'),
   color: text('color').notNull().default('#5c4d7a'),
+  ac: integer('ac'),
+  speed: integer('speed'),
+  attacks: jsonb('attacks').notNull().default([]),
+  imagePath: text('image_path'),
 })
 
 export const combats = pgTable('combats', {

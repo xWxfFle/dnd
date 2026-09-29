@@ -1,9 +1,10 @@
 import type { AttackDef } from '@dnd/shared'
-import { formatDiceFormula, parseDice, readClassFeatures, readDiceFormula } from '@dnd/shared'
+import { formatDiceFormula, parseDice, readArmorClass, readClassFeatures, readDiceFormula } from '@dnd/shared'
 import { computed, effect, event, reaction, scoped, store } from '@virentia/core'
 import { apiSend, srdQuery } from '@/shared/api'
 import { characterRoute, homeRoute, tableRoute } from '@/shared/routing'
 import { appScope, readUserId } from '@/shared/session'
+import { readAttacks } from './attacks'
 import { liveSnapshot, sendLiveFx } from './live'
 
 type CommandMethod = 'POST' | 'PATCH' | 'DELETE'
@@ -54,8 +55,8 @@ export const sheets = computed(() => {
   })
 })
 
-export const avatars = computed(() => Object.fromEntries(
-  (liveSnapshot.value?.characters ?? []).flatMap(character => character.avatarUrl ? [[character.id, character.avatarUrl]] : []),
+export const catalogNames = computed(() => Object.fromEntries(
+  (srdQuery.data.value ?? []).map(entry => [entry.id, entry.name]),
 ))
 
 export const sceneTokens = computed(() => {
@@ -68,6 +69,7 @@ export const sceneTokens = computed(() => {
 export const mapName = store('')
 export const confirmDelete = store(false)
 export const monsterId = store('monster-goblin-warrior')
+export const monsterCopies = store(1)
 export const selectedMonster = computed(() => monsters.value.find(entry => entry.id === monsterId.value))
 export const notes = store('')
 export const columns = store(20)
@@ -93,6 +95,7 @@ export const gridApplyRequested = event<void>()
 export const notesChanged = event<string>()
 export const notesSaveRequested = event<void>()
 export const monsterSelected = event<string>()
+export const monsterCopiesChanged = event<string | number>()
 export const monsterPlaceRequested = event<void>()
 export const characterPlacementToggled = event<string>()
 export const restRequested = event<{ characterId: string, kind: 'short' | 'long' }>()
@@ -105,6 +108,7 @@ export const mapFileChosen = event<File>()
 export const featureUsed = event<{ characterId: string, featureId: string }>()
 export const spellCast = event<{ characterId: string, spellId: string }>()
 export const attackRolled = event<{ attack: AttackDef, kind: AttackRollKind, exhaustion?: number }>()
+export const strikeDeclared = event<{ attack: AttackDef, attackerTokenId: string, targetTokenId: string }>()
 export const formulaChanged = event<string>()
 export const dieAdded = event<number>()
 export const bonusChanged = event<string | number>()
@@ -122,6 +126,15 @@ export const fogUpdated = event<{ sceneId: string, fog: { id: string, points: nu
 export const tokenHpChanged = event<{ tokenId: string, delta: number }>()
 export const tokenHiddenToggled = event<string>()
 export const tokenRemoved = event<string>()
+export const tokenStatsSaved = event<{
+  tokenId: string
+  name: string
+  hpMax: number
+  ac: number
+  speed: number
+  attacks: AttackDef[]
+}>()
+export const tokenImageChosen = event<{ tokenId: string, file: File }>()
 
 const checkLabelByMode = {
   advantage: 'Преимущество',
@@ -204,6 +217,12 @@ export function bootTableModel() {
       on: monsterSelected,
       run(value) {
         monsterId.value = value
+      },
+    })
+    reaction({
+      on: monsterCopiesChanged,
+      run(value) {
+        monsterCopies.value = clampInt(readCount(value, monsterCopies.value), 1, 12)
       },
     })
     reaction({
@@ -315,18 +334,30 @@ export function bootTableModel() {
     })
     reaction({
       on: monsterPlaceRequested,
-      run() {
+      async run() {
         const current = scene.value
         const base = campaignBase()
         const monster = selectedMonster.value
-        if (!current || !base)
+        if (!current || !base || !monster)
           return
-        const hp = Number(monster?.body.hp ?? 1)
-        void commandFx({
-          path: `${base}/scenes/${current.id}/tokens`,
-          method: 'POST',
-          body: { name: monster?.name ?? 'Монстр', hpCurrent: hp, hpMax: hp, monsterId: monsterId.value, hidden: false },
-        })
+        const hp = Number(monster.body.hp ?? 1)
+        const names = copyNames(monster.name, sceneTokens.value, monster.id, monsterCopies.value)
+        for (const [index, name] of names.entries()) {
+          await commandFx({
+            path: `${base}/scenes/${current.id}/tokens`,
+            method: 'POST',
+            body: {
+              name,
+              x: 1 + (index % 8),
+              y: 1 + Math.floor(index / 8),
+              hpCurrent: hp,
+              hpMax: hp,
+              monsterId: monster.id,
+              hidden: false,
+              ...placedMonster(monster.body),
+            },
+          })
+        }
       },
     })
     reaction({
@@ -473,6 +504,12 @@ export function bootTableModel() {
       },
     })
     reaction({
+      on: strikeDeclared,
+      run(strike) {
+        void sendLiveFx({ type: 'strike', ...strike })
+      },
+    })
+    reaction({
       on: dieAdded,
       run(sides) {
         const parsed = parseDice(diceFormula.value)
@@ -598,6 +635,27 @@ export function bootTableModel() {
         void sendLiveFx({ type: 'token.delete', tokenId })
       },
     })
+    reaction({
+      on: tokenStatsSaved,
+      run(patch) {
+        const base = campaignBase()
+        if (!base)
+          return
+        const { tokenId, ...body } = patch
+        void commandFx({ path: `${base}/tokens/${tokenId}`, method: 'PATCH', body })
+      },
+    })
+    reaction({
+      on: tokenImageChosen,
+      run({ tokenId, file }) {
+        const base = campaignBase()
+        if (!base)
+          return
+        const body = new FormData()
+        body.set('file', file)
+        void commandFx({ path: `${base}/tokens/${tokenId}/image`, method: 'POST', body })
+      },
+    })
   })
 }
 
@@ -622,6 +680,34 @@ function sendCombat(kind: keyof typeof combatMessageByEvent) {
   if (!current)
     return
   void sendLiveFx({ type: combatMessageByEvent[kind], sceneId: current.id })
+}
+
+function placedMonster(body: Record<string, unknown>) {
+  const speed = typeof body.speed === 'number' ? body.speed : 30
+  return {
+    ac: readArmorClass(body) ?? 10,
+    speed,
+    attacks: readAttacks(body),
+  }
+}
+
+function copyNames(base: string, tokens: { name: string, monsterId: string | null }[], monsterId: string, count: number) {
+  const taken = new Set<number>()
+  for (const token of tokens) {
+    if (token.monsterId !== monsterId && !token.name.startsWith(`${base} `) && token.name !== base)
+      continue
+    const match = token.name.slice(base.length).match(/^ (\d+)$/)
+    if (match)
+      taken.add(Number(match[1]))
+  }
+  const names: string[] = []
+  let number = 1
+  while (names.length < count) {
+    if (!taken.has(number))
+      names.push(`${base} ${number}`)
+    number += 1
+  }
+  return names
 }
 
 function readCount(value: string | number, fallback: number) {

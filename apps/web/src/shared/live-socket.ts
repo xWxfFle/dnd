@@ -4,10 +4,16 @@ export class LiveSocket {
   private socket: WebSocket | null = null
 
   connect(url: string) {
-    this.close()
+    const previous = this.socket
+    this.socket = null
+    previous?.close()
     const next = new WebSocket(url)
     this.socket = next
     return next
+  }
+
+  isCurrent(socket: WebSocket) {
+    return this.socket === socket
   }
 
   send(message: unknown) {
@@ -16,8 +22,9 @@ export class LiveSocket {
   }
 
   close() {
-    this.socket?.close()
+    const previous = this.socket
     this.socket = null
+    previous?.close()
   }
 }
 
