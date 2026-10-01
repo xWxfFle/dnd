@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { status } from 'elysia'
 import { db } from '../../db'
 import { characters } from '../../db/schema'
-import { applyRest, createCharacter, toCharacterDto } from '../../lib/table'
+import { applyRest, createCharacter, gearFields, toCharacterDto } from '../../lib/table'
 import { rejectUnlessImage, uploadName, writeUpload } from '../../lib/uploads'
 import { broadcast } from '../../live/hub'
 import { campaignRoutes } from '../../plugins/campaign-access'
@@ -28,7 +28,7 @@ export const charactersModule = campaignRoutes('campaign-characters')
   .post('/:id/characters', async ({ userId, params, body }) => {
     const character = await createCharacter({ ...body, campaignId: params.id, userId })
     if (!character)
-      return status(422, { error: 'Неизвестный класс, вид или предыстория' })
+      return status(422, { error: 'Класс, вид, предыстория или навыки не сходятся' })
     await broadcast(params.id)
     return character
   }, {
@@ -40,7 +40,8 @@ export const charactersModule = campaignRoutes('campaign-characters')
     const current = await loadCharacter(params.id, params.characterId, userId, role)
     if (!current)
       return status(404, { error: 'Not found' })
-    const [updated] = await db.update(characters).set(body).where(eq(characters.id, params.characterId)).returning()
+    const next = body.inventory ? { ...body, ...gearFields(current, body.inventory) } : body
+    const [updated] = await db.update(characters).set(next).where(eq(characters.id, params.characterId)).returning()
     await broadcast(params.id)
     return toCharacterDto(updated)
   }, {

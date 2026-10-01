@@ -1,3 +1,5 @@
+import type { Skill } from '@dnd/shared'
+import { skillOfferForClass } from '@dnd/shared'
 import { reaction, scoped } from '@virentia/core'
 import { createField, createForm, createWizardForm, readStoreSnapshot, step } from '@virentia/forms'
 
@@ -7,6 +9,7 @@ import { z } from 'zod'
 import { bootHome } from '@/pages/home/model'
 import { bootTable } from '@/pages/table/live'
 import { bootTableModel } from '@/pages/table/model'
+import { bootRollToasts } from '@/pages/table/roll-toast'
 import {
   campaignsQuery,
   createCampaignMutation,
@@ -40,9 +43,27 @@ export const registerForm = createForm({
 
 const abilityField = () => createField(10, { validate: zodFieldValidator(z.number().int().min(1).max(30)) })
 
+const classIdField = createField('class-fighter')
+
+const skillsField = createField<Skill[]>([], {
+  validate(value, ctx) {
+    const offer = skillOfferForClass(ctx.read(classIdField.state))
+    if (!offer)
+      return 'Неизвестный класс'
+    if (new Set(value).size !== value.length)
+      return 'Навыки без повторов'
+    const allowed = new Set<string>(offer.skills)
+    if (value.some(skill => !allowed.has(skill)))
+      return 'Навык не из списка класса'
+    if (value.length !== offer.skillChoices)
+      return `Нужно навыков: ${offer.skillChoices}`
+    return null
+  },
+})
+
 export const characterWizard = createWizardForm({
   schema: {
-    classId: createField('class-fighter'),
+    classId: classIdField,
     speciesId: createField('species-human'),
     backgroundId: createField('background-soldier'),
     str: abilityField(),
@@ -51,12 +72,14 @@ export const characterWizard = createWizardForm({
     int: abilityField(),
     wis: abilityField(),
     cha: abilityField(),
+    skills: skillsField,
     name: createField('Герой', { validate: zodFieldValidator(z.string().min(1)) }),
   },
   steps: form => [
     step('class', { form: form.pick({ classId: true }) }),
     step('origin', { form: form.pick({ speciesId: true, backgroundId: true }) }),
     step('abilities', { form: form.pick({ str: true, dex: true, con: true, int: true, wis: true, cha: true }) }),
+    step('skills', { form: form.pick({ classId: true, skills: true }) }),
     step('name', { form: form.pick({ name: true }) }),
   ],
 })
@@ -110,6 +133,12 @@ export function bootClient() {
       },
     })
     reaction({
+      on: classIdField.changed,
+      run() {
+        void skillsField.fill([])
+      },
+    })
+    reaction({
       on: characterWizard.completed,
       run() {
         const campaignId = openedCampaignId()
@@ -131,6 +160,7 @@ export function bootClient() {
               wis: values.wis,
               cha: values.cha,
             },
+            skillProficiencies: values.skills,
           },
         })
       },
@@ -168,6 +198,7 @@ export function bootClient() {
   bootHome()
   bootTable()
   bootTableModel()
+  bootRollToasts()
 }
 
 function openedCampaignId() {

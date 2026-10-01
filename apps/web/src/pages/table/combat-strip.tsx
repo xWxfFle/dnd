@@ -6,7 +6,7 @@ import { useUnit } from '@virentia/react'
 import { useState } from 'react'
 import { AttackRoll } from './attack-roll'
 import { readAttacks } from './attacks'
-import { combatAdvanced, combatEnded, combatStarted, slotMarked, strikeDeclared, tokenHpChanged } from './model'
+import { combatAdvanced, combatEnded, combatStarted, dm, slotMarked, strikeDeclared, tokenHpChanged } from './model'
 
 export function CombatStrip(props: {
   combat: CombatDto | null
@@ -16,13 +16,13 @@ export function CombatStrip(props: {
   characters: CharacterDto[]
   onFocus: (tokenId: string) => void
   onOpenSheet: (characterId: string) => void
+  onOpenToken: (tokenId: string) => void
 }) {
-  const { start, next, end, markSlot, changeHp, strike } = useUnit({
+  const { start, next, end, markSlot, strike } = useUnit({
     start: combatStarted,
     next: combatAdvanced,
     end: combatEnded,
     markSlot: slotMarked,
-    changeHp: tokenHpChanged,
     strike: strikeDeclared,
   })
   const [targetId, setTargetId] = useState<string | null>(null)
@@ -34,88 +34,142 @@ export function CombatStrip(props: {
     setAimedTurn(activeId)
     setTargetId(null)
   }
+  const actingToken = active?.tokenId ? props.tokens.find(item => item.id === active.tokenId) ?? null : null
   return (
     <Stack gap="sm">
-      <Text size="sm">
-        {combat
-          ? `Раунд ${combat.round}${active ? ` · ход: ${active.name}` : ''}`
-          : 'Бой не начат. «Начать» бросает инициативу всем на карте'}
-      </Text>
+      <Group justify="space-between" wrap="nowrap">
+        <Text fw={700}>
+          {combat ? `Раунд ${combat.round}${active ? ` · ${active.name}` : ''}` : 'Бой'}
+        </Text>
+        {props.dm && (
+          <Group gap="xs" wrap="nowrap">
+            {combat
+              ? (
+                  <>
+                    <Button size="xs" onClick={() => void next()}>Дальше</Button>
+                    <Button size="xs" variant="default" onClick={() => void end()}>Конец</Button>
+                  </>
+                )
+              : <Button size="xs" onClick={() => void start()}>Начать</Button>}
+          </Group>
+        )}
+      </Group>
+      {!combat && <Text size="sm" c="dimmed">«Начать» бросает инициативу всем на карте</Text>}
       {combat && combat.combatants.length === 0 && <Text size="sm" c="dimmed">На карте никого</Text>}
+      {active && actingToken && !actingToken.obscured && (
+        <ActingTurn
+          token={actingToken}
+          tokens={props.tokens}
+          monsters={props.monsters}
+          characters={props.characters}
+          targetId={targetId}
+          onTarget={setTargetId}
+          slotSpent={active.slotSpentThisTurn}
+          onSlot={() => void markSlot()}
+          onStrike={(attack, targetTokenId) => {
+            if (active.tokenId)
+              strike({ attack, attackerTokenId: active.tokenId, targetTokenId })
+          }}
+        />
+      )}
       {combat?.combatants.map((combatant, index) => {
         const acting = index === combat.activeIndex
         const tokenId = combatant.tokenId
         const token = tokenId ? props.tokens.find(item => item.id === tokenId) ?? null : null
-        const attacks = token ? attacksOf(token, props.monsters, props.characters) : []
         return (
           <Stack key={combatant.id} gap={4}>
             <Button
               fullWidth
               size="xs"
-              variant={acting ? 'light' : 'default'}
-              onClick={() => {
-                if (tokenId)
-                  props.onFocus(tokenId)
-                if (token?.characterId)
-                  props.onOpenSheet(token.characterId)
-              }}
+              variant={acting ? 'light' : 'subtle'}
+              onClick={() => openCombatant(props, tokenId, token)}
             >
               {`${combatant.initiative}. ${combatant.name}${combatant.hidden ? ' · скрыт' : ''}`}
             </Button>
             {!token?.obscured && <HpBar current={combatant.hpCurrent} max={combatant.hpMax} />}
-            {props.dm && tokenId && !token?.obscured && (
-              <Group gap={4}>
-                <ActionIcon size="sm" variant="default" aria-label="Урон" onClick={() => changeHp({ tokenId, delta: -1 })}>
-                  <IconMinus size={14} />
-                </ActionIcon>
-                <ActionIcon size="sm" variant="default" aria-label="Лечение" onClick={() => changeHp({ tokenId, delta: 1 })}>
-                  <IconPlus size={14} />
-                </ActionIcon>
-                <Text size="xs" c="dimmed">{`${combatant.hpCurrent}/${combatant.hpMax}`}</Text>
-              </Group>
-            )}
-            {acting && !token?.obscured && (
-              <Stack gap={6}>
-                <Text size="xs">{attacks.length > 0 ? 'Атаки этого хода' : 'У этой фишки нет атак'}</Text>
-                {token && attacks.some(attack => attack.attackBonus > 0) && (
-                  <Select
-                    size="xs"
-                    aria-label="Кого атаковать"
-                    placeholder="Кого атаковать"
-                    data={targetsOf(token, props.tokens, props.monsters, props.characters)}
-                    value={targetId}
-                    onChange={setTargetId}
-                  />
-                )}
-                {attacks.map(attack => (
-                  <AttackRoll
-                    key={attack.id}
-                    attack={attack}
-                    canStrike={Boolean(targetId)}
-                    onStrike={tokenId
-                      ? () => {
-                          if (targetId)
-                            strike({ attack, attackerTokenId: tokenId, targetTokenId: targetId })
-                        }
-                      : undefined}
-                  />
-                ))}
-                <Button size="xs" variant="light" disabled={combatant.slotSpentThisTurn} onClick={() => void markSlot()}>
-                  {combatant.slotSpentThisTurn ? 'Ячейка за ход потрачена' : 'Ячейка за ход'}
-                </Button>
-              </Stack>
-            )}
+            {acting && props.dm && tokenId && !token?.obscured && <HpAdjust tokenId={tokenId} />}
           </Stack>
         )
       })}
-      {props.dm && (
-        <Group gap="xs">
-          <Button size="xs" variant={combat ? 'light' : 'filled'} onClick={() => void start()}>Начать</Button>
-          <Button size="xs" variant={combat ? 'filled' : 'default'} disabled={!combat} onClick={() => void next()}>Дальше</Button>
-          <Button size="xs" variant="default" disabled={!combat} onClick={() => void end()}>Конец</Button>
-        </Group>
-      )}
     </Stack>
+  )
+}
+
+function openCombatant(
+  props: { dm: boolean, onFocus: (tokenId: string) => void, onOpenSheet: (characterId: string) => void, onOpenToken: (tokenId: string) => void },
+  tokenId: string | null,
+  token: { characterId: string | null } | null,
+) {
+  if (!tokenId)
+    return
+  props.onFocus(tokenId)
+  if (token?.characterId) {
+    props.onOpenSheet(token.characterId)
+    return
+  }
+  if (props.dm)
+    props.onOpenToken(tokenId)
+}
+
+function ActingTurn(props: {
+  token: TokenDto
+  tokens: TokenDto[]
+  monsters: SrdEntryDto[]
+  characters: CharacterDto[]
+  targetId: string | null
+  onTarget: (tokenId: string | null) => void
+  slotSpent: boolean
+  onSlot: () => void
+  onStrike: (attack: ReturnType<typeof attacksOf>[number], targetTokenId: string) => void
+}) {
+  const attacks = attacksOf(props.token, props.monsters, props.characters)
+  return (
+    <Stack gap={6}>
+      <Text size="xs">{attacks.length > 0 ? 'Атаки этого хода' : 'У этой фишки нет атак'}</Text>
+      {attacks.some(attack => attack.attackBonus > 0) && (
+        <Select
+          size="xs"
+          aria-label="Кого атаковать"
+          placeholder="Кого атаковать"
+          data={targetsOf(props.token, props.tokens, props.monsters, props.characters)}
+          value={props.targetId}
+          onChange={props.onTarget}
+        />
+      )}
+      {attacks.map(attack => (
+        <AttackRoll
+          key={attack.id}
+          attack={attack}
+          canStrike={Boolean(props.targetId)}
+          onStrike={() => {
+            if (props.targetId)
+              props.onStrike(attack, props.targetId)
+          }}
+        />
+      ))}
+      <Button size="xs" variant="light" disabled={props.slotSpent} onClick={props.onSlot}>
+        {props.slotSpent ? 'Ячейка за ход потрачена' : 'Ячейка за ход'}
+      </Button>
+    </Stack>
+  )
+}
+
+export function HpAdjust(props: { tokenId: string }) {
+  const { master, changeHp } = useUnit({
+    master: dm,
+    changeHp: tokenHpChanged,
+  })
+  if (!master)
+    return null
+  return (
+    <Group gap={4}>
+      <ActionIcon size="sm" variant="default" aria-label="Урон" onClick={() => changeHp({ tokenId: props.tokenId, delta: -1 })}>
+        <IconMinus size={14} />
+      </ActionIcon>
+      <ActionIcon size="sm" variant="default" aria-label="Лечение" onClick={() => changeHp({ tokenId: props.tokenId, delta: 1 })}>
+        <IconPlus size={14} />
+      </ActionIcon>
+    </Group>
   )
 }
 

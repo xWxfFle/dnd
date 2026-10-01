@@ -1,6 +1,37 @@
 import { z } from 'zod'
+import { itemKinds, skills } from './types'
 
 export const abilitySchema = z.enum(['str', 'dex', 'con', 'int', 'wis', 'cha'])
+export const skillSchema = z.enum(skills)
+export const itemKindSchema = z.enum(itemKinds)
+
+export const inventoryItemSchema = z.object({
+  id: z.string(),
+  itemId: z.string(),
+  name: z.string(),
+  quantity: z.number().int(),
+  kind: itemKindSchema,
+  equipped: z.boolean(),
+})
+
+export const skillListSchema = z.array(skillSchema).refine(
+  list => new Set(list).size === list.length,
+  'Навыки без повторов',
+)
+
+export const saveListSchema = z.array(abilitySchema).refine(
+  list => new Set(list).size === list.length,
+  'Спасброски без повторов',
+)
+
+export const saveOverridesSchema = z.object({
+  str: z.number().int().optional(),
+  dex: z.number().int().optional(),
+  con: z.number().int().optional(),
+  int: z.number().int().optional(),
+  wis: z.number().int().optional(),
+  cha: z.number().int().optional(),
+})
 
 export const abilitiesSchema = z.object({
   str: z.number().int().min(1).max(30),
@@ -84,6 +115,8 @@ export const characterSchema = z.object({
   backgroundId: z.string(),
   level: z.number().int().min(1).max(20),
   abilities: abilitiesSchema,
+  skillProficiencies: skillListSchema,
+  saveProficiencies: saveListSchema,
   hpCurrent: z.number().int(),
   hpMax: z.number().int(),
   hpTemp: z.number().int(),
@@ -99,11 +132,7 @@ export const characterSchema = z.object({
     successes: z.number().int().min(0).max(3),
     failures: z.number().int().min(0).max(3),
   }),
-  inventory: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    quantity: z.number().int(),
-  })),
+  inventory: z.array(inventoryItemSchema),
   weaponMasteries: z.array(z.string()),
   hitDie: z.string(),
   hitDiceRemaining: z.number().int(),
@@ -118,6 +147,7 @@ export const createCharacterSchema = z.object({
   classId: z.string().min(1),
   backgroundId: z.string().min(1),
   abilities: abilitiesSchema,
+  skillProficiencies: skillListSchema,
 })
 
 export const updateCharacterSchema = characterSchema.omit({
@@ -208,6 +238,9 @@ export const tokenSchema = z.object({
   ac: z.number().int().nullable(),
   speed: z.number().int().nullable(),
   attacks: z.array(attackSchema),
+  abilities: abilitiesSchema.nullable(),
+  saves: saveOverridesSchema.nullable(),
+  inventory: z.array(inventoryItemSchema),
   imageUrl: z.string().nullable(),
   obscured: z.boolean(),
 })
@@ -226,6 +259,8 @@ export const createTokenSchema = z.object({
   ac: z.number().int().min(0).max(40).nullable().optional(),
   speed: z.number().int().min(0).max(200).nullable().optional(),
   attacks: z.array(attackSchema).max(8).optional(),
+  abilities: abilitiesSchema.nullable().optional(),
+  saves: saveOverridesSchema.nullable().optional(),
 })
 
 export const updateTokenSchema = z.object({
@@ -233,7 +268,10 @@ export const updateTokenSchema = z.object({
   hpMax: z.number().int().min(1).max(999),
   ac: z.number().int().min(0).max(40),
   speed: z.number().int().min(0).max(200),
-  attacks: z.array(attackSchema).max(8),
+  attacks: z.array(attackSchema).max(12),
+  abilities: abilitiesSchema.nullable(),
+  saves: saveOverridesSchema.nullable(),
+  inventory: z.array(inventoryItemSchema).max(40),
 })
 
 export const moveTokenSchema = z.object({

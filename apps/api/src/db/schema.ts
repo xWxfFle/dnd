@@ -55,6 +55,8 @@ export const characters = pgTable('characters', {
   backgroundId: text('background_id').notNull(),
   level: integer('level').notNull().default(1),
   abilities: jsonb('abilities').notNull(),
+  skillProficiencies: jsonb('skill_proficiencies').notNull().default([]),
+  saveProficiencies: jsonb('save_proficiencies').notNull().default([]),
   hpCurrent: integer('hp_current').notNull(),
   hpMax: integer('hp_max').notNull(),
   hpTemp: integer('hp_temp').notNull().default(0),
@@ -103,6 +105,9 @@ export const tokens = pgTable('tokens', {
   ac: integer('ac'),
   speed: integer('speed'),
   attacks: jsonb('attacks').notNull().default([]),
+  abilities: jsonb('abilities'),
+  saves: jsonb('saves'),
+  inventory: jsonb('inventory').notNull().default([]),
   imagePath: text('image_path'),
 })
 

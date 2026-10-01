@@ -67,7 +67,7 @@ export function DiceTray() {
 
 export function DiceLog() {
   const rolls = useUnit(liveSnapshot)
-  const recent = (rolls?.rolls ?? []).slice(0, 4)
+  const recent = (rolls?.rolls ?? []).slice(-4).reverse()
   if (recent.length === 0)
     return <Text size="xs" c="dimmed">Бросков пока нет</Text>
   return (

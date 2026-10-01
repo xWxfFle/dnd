@@ -1,4 +1,5 @@
-import type { ClassFeature } from './types'
+import type { Abilities, ClassFeature, GearAbility, GearStats, SaveOverrides, Skill } from './types'
+import { skills } from './types'
 
 export interface SrdSeed {
   id: string
@@ -7,8 +8,51 @@ export interface SrdSeed {
   body: Record<string, unknown>
 }
 
+const offered = (list: readonly Skill[]) => list
+
+const skillOfferByDraft = {
+  barbarian: offered(['animal-handling', 'athletics', 'intimidation', 'nature', 'perception', 'survival']),
+  bard: offered(skills),
+  cleric: offered(['history', 'insight', 'medicine', 'persuasion', 'religion']),
+  druid: offered(['arcana', 'animal-handling', 'insight', 'medicine', 'nature', 'perception', 'religion', 'survival']),
+  fighter: offered(['acrobatics', 'animal-handling', 'athletics', 'history', 'insight', 'intimidation', 'perception', 'persuasion', 'survival']),
+  monk: offered(['acrobatics', 'athletics', 'history', 'insight', 'religion', 'stealth']),
+  paladin: offered(['athletics', 'insight', 'intimidation', 'medicine', 'persuasion', 'religion']),
+  ranger: offered(['animal-handling', 'athletics', 'insight', 'investigation', 'nature', 'perception', 'stealth', 'survival']),
+  rogue: offered(['acrobatics', 'athletics', 'deception', 'insight', 'intimidation', 'investigation', 'perception', 'persuasion', 'sleight-of-hand', 'stealth']),
+  sorcerer: offered(['arcana', 'deception', 'insight', 'intimidation', 'persuasion', 'religion']),
+  warlock: offered(['arcana', 'deception', 'history', 'intimidation', 'investigation', 'nature', 'religion']),
+  wizard: offered(['arcana', 'history', 'insight', 'investigation', 'medicine', 'nature', 'religion']),
+}
+
+const skillChoicesByDraft = {
+  barbarian: 2,
+  bard: 3,
+  cleric: 2,
+  druid: 2,
+  fighter: 2,
+  monk: 2,
+  paladin: 2,
+  ranger: 3,
+  rogue: 4,
+  sorcerer: 2,
+  warlock: 2,
+  wizard: 2,
+} as const satisfies Record<keyof typeof skillOfferByDraft, number>
+
+export function skillOfferForClass(classId: string) {
+  const draftId = classId.replace(/^class-/, '')
+  if (!Object.hasOwn(skillOfferByDraft, draftId))
+    return null
+  const id = draftId as keyof typeof skillOfferByDraft
+  return {
+    skillChoices: skillChoicesByDraft[id],
+    skills: skillOfferByDraft[id],
+  }
+}
+
 interface ClassDraft {
-  id: string
+  id: keyof typeof skillOfferByDraft
   name: string
   hitDie: string
   saves: string[]
@@ -202,6 +246,8 @@ const classes: SrdSeed[] = classDrafts.map(draft => ({
     subclassName: draft.subclassName,
     feature: draft.features.map(item => item.name).join('. '),
     weaponMastery: draft.weaponMastery,
+    skillChoices: skillChoicesByDraft[draft.id],
+    skills: skillOfferByDraft[draft.id],
     spellIds: draft.spellIds.map(id => `spell-${id}`),
     features: draft.features,
   },
@@ -305,67 +351,122 @@ const monsters: SrdSeed[] = [
   monster('goblin-warrior', 'Гоблин-воин', 15, 12, 7, [
     attack('scimitar', 'Скимитар', 4, '1d6', 2, 'рубящий'),
     attack('shortbow', 'Короткий лук', 4, '1d6', 2, 'колющий'),
-  ]),
+  ], scores(8, 14, 10, 10, 8, 8)),
   monster('wolf', 'Волк', 13, 11, 2, [
     attack('bite', 'Укус', 4, '2d4', 2, 'колющий'),
-  ]),
+  ], scores(12, 15, 12, 3, 12, 6)),
   monster('skeleton', 'Скелет', 13, 13, 2, [
     attack('shortsword', 'Короткий меч', 4, '1d6', 2, 'колющий'),
     attack('shortbow', 'Короткий лук', 4, '1d6', 2, 'колющий'),
-  ]),
+  ], scores(10, 14, 15, 6, 8, 5)),
   monster('zombie', 'Зомби', 8, 15, -2, [
     attack('slam', 'Удар', 3, '1d6', 1, 'дробящий'),
-  ]),
+  ], scores(13, 6, 16, 3, 6, 5)),
   monster('guard', 'Стражник', 16, 11, 1, [
     attack('spear', 'Копьё', 3, '1d6', 1, 'колющий'),
-  ]),
+  ], scores(13, 12, 12, 10, 11, 10)),
   monster('hobgoblin', 'Хобгоблин-воин', 18, 11, 3, [
     attack('longsword', 'Длинный меч', 3, '1d8', 1, 'рубящий'),
-  ]),
+  ], scores(13, 12, 12, 10, 10, 9)),
   monster('owlbear', 'Совомед', 13, 59, 2, [
     attack('beak', 'Клюв', 7, '1d10', 5, 'колющий'),
     attack('claws', 'Когти', 7, '2d8', 5, 'рубящий'),
-  ]),
+  ], scores(20, 12, 17, 3, 12, 7)),
   monster('ogre', 'Огр', 11, 68, 1, [
     attack('greatclub', 'Палица', 6, '2d8', 4, 'дробящий'),
-  ]),
+  ], scores(19, 8, 16, 5, 7, 7)),
   monster('dire-wolf', 'Лютый волк', 14, 22, 2, [
     attack('bite', 'Укус', 5, '1d10', 3, 'колющий'),
-  ]),
+  ], scores(17, 15, 15, 3, 12, 7)),
   monster('ghoul', 'Упырь', 12, 22, 2, [
     attack('claws', 'Когти', 4, '2d4', 2, 'рубящий'),
     { id: 'paralyze', name: 'Паралич укуса', attackBonus: 0, damageDice: '0', damageBonus: 0, damageType: 'спасбросок Телосложения Сл 10' },
-  ]),
+  ], scores(13, 15, 10, 7, 10, 6)),
 ]
 
 function attack(id: string, name: string, attackBonus: number, damageDice: string, damageBonus: number, damageType: string) {
   return { id, name, attackBonus, damageDice, damageBonus, damageType }
 }
 
-function monster(id: string, name: string, ac: number, hp: number, initiative: number, attacks: ReturnType<typeof attack>[]): SrdSeed {
+function scores(str: number, dex: number, con: number, int: number, wis: number, cha: number): Abilities {
+  return { str, dex, con, int, wis, cha }
+}
+
+function monster(id: string, name: string, ac: number, hp: number, initiative: number, attacks: ReturnType<typeof attack>[], abilities: Abilities, saves: SaveOverrides = {}): SrdSeed {
   return {
     id: `monster-${id}`,
     kind: 'monster',
     name,
-    body: { ac, hp, initiative, speed: 30, attacks },
+    body: { ac, hp, initiative, speed: 30, attacks, abilities, saves },
   }
 }
 
-const items: SrdSeed[] = [
-  ['longsword', 'Длинный меч', '1d8', 'рубящий', 'Универсальное (1d10). Мастерство: отталкивание.'],
-  ['shortsword', 'Короткий меч', '1d6', 'колющий', 'Лёгкое, фехтовальное. Мастерство: дразнящее.'],
-  ['rapier', 'Рапира', '1d8', 'колющий', 'Фехтовальное. Мастерство: дразнящее.'],
-  ['greataxe', 'Секира', '1d12', 'рубящий', 'Тяжёлое, двуручное. Мастерство: рассечение.'],
-  ['shortbow', 'Короткий лук', '1d6', 'колющий', 'Дальность 80/320. Мастерство: дразнящее.'],
-  ['leather', 'Кожаный доспех', '', '', 'КД 11 + Ловкость.'],
-  ['chain-shirt', 'Кольчужная рубаха', '', '', 'КД 13 + Ловкость (макс. 2).'],
-  ['shield', 'Щит', '', '', '+2 КД.'],
-].map(([id, name, dice, damageType, text]) => ({
-  id: `item-${id}`,
+const gearAbilityByKey = {
+  str: 'str',
+  dex: 'dex',
+  finesse: 'finesse',
+} as const satisfies Record<string, GearAbility>
+
+const readGearByKind = {
+  weapon: readWeaponGear,
+  armor: readArmorGear,
+  shield: readShieldGear,
+} as const
+
+interface ItemDraft {
+  id: string
+  name: string
+  text: string
+  gear: GearStats
+}
+
+const itemDrafts: ItemDraft[] = [
+  { id: 'longsword', name: 'Длинный меч', text: 'Универсальное (1d10). Мастерство: отталкивание.', gear: { kind: 'weapon', dice: '1d8', damageType: 'рубящий', ability: 'str' } },
+  { id: 'shortsword', name: 'Короткий меч', text: 'Лёгкое, фехтовальное. Мастерство: дразнящее.', gear: { kind: 'weapon', dice: '1d6', damageType: 'колющий', ability: 'finesse' } },
+  { id: 'rapier', name: 'Рапира', text: 'Фехтовальное. Мастерство: дразнящее.', gear: { kind: 'weapon', dice: '1d8', damageType: 'колющий', ability: 'finesse' } },
+  { id: 'greataxe', name: 'Секира', text: 'Тяжёлое, двуручное. Мастерство: рассечение.', gear: { kind: 'weapon', dice: '1d12', damageType: 'рубящий', ability: 'str' } },
+  { id: 'shortbow', name: 'Короткий лук', text: 'Дальность 80/320. Мастерство: дразнящее.', gear: { kind: 'weapon', dice: '1d6', damageType: 'колющий', ability: 'dex' } },
+  { id: 'leather', name: 'Кожаный доспех', text: 'КД 11 + Ловкость.', gear: { kind: 'armor', base: 11, dexCap: null } },
+  { id: 'chain-shirt', name: 'Кольчужная рубаха', text: 'КД 13 + Ловкость (макс. 2).', gear: { kind: 'armor', base: 13, dexCap: 2 } },
+  { id: 'shield', name: 'Щит', text: '+2 КД.', gear: { kind: 'shield' } },
+]
+
+const items: SrdSeed[] = itemDrafts.map(draft => ({
+  id: `item-${draft.id}`,
   kind: 'item' as const,
-  name: String(name),
-  body: { dice, damageType, text },
+  name: draft.name,
+  body: { ...draft.gear, text: draft.text },
 }))
+
+export function readGearBody(body: Record<string, unknown> | null | undefined): GearStats | null {
+  if (!body)
+    return null
+  const kind = body.kind
+  if (typeof kind !== 'string' || !Object.hasOwn(readGearByKind, kind))
+    return null
+  return readGearByKind[kind as keyof typeof readGearByKind](body)
+}
+
+function readWeaponGear(body: Record<string, unknown>): GearStats | null {
+  const ability = typeof body.ability === 'string' && Object.hasOwn(gearAbilityByKey, body.ability)
+    ? gearAbilityByKey[body.ability as keyof typeof gearAbilityByKey]
+    : null
+  if (typeof body.dice !== 'string' || typeof body.damageType !== 'string' || !ability)
+    return null
+  return { kind: 'weapon', dice: body.dice, damageType: body.damageType, ability }
+}
+
+function readArmorGear(body: Record<string, unknown>): GearStats | null {
+  if (typeof body.base !== 'number')
+    return null
+  if (body.dexCap != null && typeof body.dexCap !== 'number')
+    return null
+  return { kind: 'armor', base: body.base, dexCap: typeof body.dexCap === 'number' ? body.dexCap : null }
+}
+
+function readShieldGear(): GearStats {
+  return { kind: 'shield' }
+}
 
 export const srdCatalog: SrdSeed[] = [
   ...classes,
@@ -376,3 +477,11 @@ export const srdCatalog: SrdSeed[] = [
   ...monsters,
   ...items,
 ]
+
+export function gearByItemId(itemId: string) {
+  const entry = srdCatalog.find(item => item.id === itemId)
+  const stats = readGearBody(entry?.body)
+  if (!entry || !stats)
+    return null
+  return { name: entry.name, stats }
+}

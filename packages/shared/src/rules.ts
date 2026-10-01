@@ -1,4 +1,5 @@
-import type { Abilities, Ability, AttackDef } from './types'
+import type { Abilities, Ability, AttackDef, GearAbility, GearStats, InventoryItem, ItemKind, SaveOverrides } from './types'
+import { abilities as abilityKeys } from './types'
 
 export function abilityModifier(score: number) {
   return Math.floor((score - 10) / 2)
@@ -211,8 +212,47 @@ export function spellSaveDc(abilities: Abilities, casting: Ability, level: numbe
   return 8 + proficiencyBonus(level) + abilityModifier(abilities[casting])
 }
 
+export function readAbilities(value: unknown): Abilities | null {
+  if (!value || typeof value !== 'object')
+    return null
+  const row = value as Record<string, unknown>
+  const scores = {} as Abilities
+  for (const key of abilityKeys) {
+    const score = row[key]
+    if (typeof score !== 'number' || !Number.isInteger(score))
+      return null
+    scores[key] = score
+  }
+  return scores
+}
+
+export function readSaveOverrides(value: unknown): SaveOverrides {
+  if (!value || typeof value !== 'object')
+    return {}
+  const row = value as Record<string, unknown>
+  const saves: SaveOverrides = {}
+  for (const key of abilityKeys) {
+    const bonus = row[key]
+    if (typeof bonus === 'number' && Number.isInteger(bonus))
+      saves[key] = bonus
+  }
+  return saves
+}
+
+export function saveBonus(abilities: Abilities, saves: SaveOverrides, ability: Ability) {
+  return saves[ability] ?? abilityModifier(abilities[ability])
+}
+
 export function attackBonus(abilities: Abilities, ability: Ability, level: number, proficient: boolean) {
   return abilityModifier(abilities[ability]) + (proficient ? proficiencyBonus(level) : 0)
+}
+
+export function d20Formula(bonus: number) {
+  if (bonus === 0)
+    return '1d20'
+  if (bonus > 0)
+    return `1d20+${bonus}`
+  return `1d20${bonus}`
 }
 
 export function armorClass(options: {
@@ -224,6 +264,130 @@ export function armorClass(options: {
   const dex = abilityModifier(options.abilities.dex)
   const capped = options.dexCap == null ? dex : Math.min(dex, options.dexCap)
   return (options.base ?? 10) + capped + (options.shield ?? 0)
+}
+
+const itemKindByKey = {
+  weapon: 'weapon',
+  armor: 'armor',
+  shield: 'shield',
+  gear: 'gear',
+} as const satisfies Record<string, ItemKind>
+
+export function readInventory(value: unknown): InventoryItem[] {
+  if (!Array.isArray(value))
+    return []
+  return value.flatMap((entry) => {
+    const item = readInventoryItem(entry)
+    return item ? [item] : []
+  })
+}
+
+export function weaponAbility(abilities: Abilities, ability: GearAbility): Ability {
+  if (ability !== 'finesse')
+    return ability
+  return abilityModifier(abilities.dex) > abilityModifier(abilities.str) ? 'dex' : 'str'
+}
+
+export function equipmentSheet(input: {
+  abilities: Abilities
+  level: number
+  inventory: InventoryItem[]
+  attacks: AttackDef[]
+  gearOf: (itemId: string) => { name: string, stats: GearStats } | null
+}) {
+  const inventory = settleEquipped(input.inventory.map(item => alignGear(item, input.gearOf(item.itemId))))
+  const armor = inventory.find(item => item.kind === 'armor' && item.equipped)
+  const armorStats = armor ? input.gearOf(armor.itemId)?.stats : null
+  const shield = inventory.some(item => item.kind === 'shield' && item.equipped)
+  const ac = armorClass({
+    abilities: input.abilities,
+    base: armorStats?.kind === 'armor' ? armorStats.base : 10,
+    dexCap: armorStats?.kind === 'armor' ? armorStats.dexCap : null,
+    shield: shield ? 2 : 0,
+  })
+  const weapons = inventory.flatMap((item) => {
+    if (item.kind !== 'weapon' || !item.equipped)
+      return []
+    const stats = input.gearOf(item.itemId)?.stats
+    if (stats?.kind !== 'weapon')
+      return []
+    const ability = weaponAbility(input.abilities, stats.ability)
+    return [{
+      id: `gear-${item.id}`,
+      name: item.name,
+      attackBonus: attackBonus(input.abilities, ability, input.level, true),
+      damageDice: stats.dice,
+      damageBonus: abilityModifier(input.abilities[ability]),
+      damageType: stats.damageType,
+    }]
+  })
+  const spells = input.attacks.filter(attack => attack.id === 'spell')
+  return { inventory, ac, attacks: [...weapons, ...spells] }
+}
+
+export function monsterEquipment(input: {
+  abilities: Abilities
+  baseAc: number
+  inventory: InventoryItem[]
+  attacks: AttackDef[]
+  gearOf: (itemId: string) => { name: string, stats: GearStats } | null
+}) {
+  const worn = equipmentSheet({
+    abilities: input.abilities,
+    level: 1,
+    inventory: input.inventory,
+    attacks: [],
+    gearOf: input.gearOf,
+  })
+  const armor = worn.inventory.some(item => item.kind === 'armor' && item.equipped)
+  const shield = worn.inventory.some(item => item.kind === 'shield' && item.equipped)
+  const natural = input.attacks.filter(attack => !attack.id.startsWith('gear-'))
+  const ac = armor ? worn.ac : input.baseAc + (shield ? 2 : 0)
+  return {
+    inventory: worn.inventory,
+    ac,
+    attacks: [...natural, ...worn.attacks].slice(0, 12),
+  }
+}
+
+function readInventoryItem(value: unknown): InventoryItem | null {
+  if (!value || typeof value !== 'object')
+    return null
+  const item = value as Record<string, unknown>
+  if (typeof item.id !== 'string' || typeof item.name !== 'string')
+    return null
+  const kind = typeof item.kind === 'string' && Object.hasOwn(itemKindByKey, item.kind)
+    ? itemKindByKey[item.kind as keyof typeof itemKindByKey]
+    : 'gear'
+  return {
+    id: item.id,
+    itemId: typeof item.itemId === 'string' ? item.itemId : item.id,
+    name: item.name,
+    quantity: typeof item.quantity === 'number' ? item.quantity : 1,
+    kind,
+    equipped: item.equipped === true,
+  }
+}
+
+function alignGear(item: InventoryItem, gear: { name: string, stats: GearStats } | null): InventoryItem {
+  if (!gear)
+    return { ...item, kind: 'gear', equipped: false }
+  return { ...item, name: gear.name, kind: gear.stats.kind }
+}
+
+function settleEquipped(items: InventoryItem[]) {
+  const lastIndex = { armor: -1, shield: -1 }
+  items.forEach((item, index) => {
+    if ((item.kind === 'armor' || item.kind === 'shield') && item.equipped)
+      lastIndex[item.kind] = index
+  })
+  return items.map((item, index) => {
+    if (item.kind === 'gear')
+      return { ...item, equipped: false }
+    if (item.kind === 'armor' || item.kind === 'shield')
+      return { ...item, equipped: index === lastIndex[item.kind] }
+    return item
+  })
 }
 
 export function longRestExhaustion(level: number) {

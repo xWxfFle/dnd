@@ -1,5 +1,5 @@
-import type { AttackDef } from '@dnd/shared'
-import { formatDiceFormula, parseDice, readArmorClass, readClassFeatures, readDiceFormula } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, InventoryItem, SaveOverrides } from '@dnd/shared'
+import { abilityLabel, abilityModifier, d20Formula, formatDiceFormula, gearByItemId, parseDice, readAbilities, readArmorClass, readClassFeatures, readDiceFormula, readSaveOverrides, saveBonus } from '@dnd/shared'
 import { computed, effect, event, reaction, scoped, store } from '@virentia/core'
 import { apiSend, srdQuery } from '@/shared/api'
 import { characterRoute, homeRoute, tableRoute } from '@/shared/routing'
@@ -78,8 +78,12 @@ export const cellSize = store(48)
 const gridKey = store('')
 const notesSceneId = store<string | null>(null)
 
+export const sheetRollModes = ['normal', 'advantage', 'disadvantage'] as const
+export type SheetRollMode = (typeof sheetRollModes)[number]
+
 export const diceFormula = store('1d20')
 export const diceError = store('')
+export const sheetRollMode = store<SheetRollMode>('normal')
 export const parsedDice = computed(() => parseDice(diceFormula.value))
 export const kitError = store<{ characterId: string, message: string } | null>(null)
 
@@ -103,6 +107,9 @@ export const inspirationToggled = event<string>()
 export const exhaustionAdjusted = event<{ characterId: string, delta: number }>()
 export const deathSaveRecorded = event<{ characterId: string, kind: 'successes' | 'failures' }>()
 export const conditionToggled = event<{ characterId: string, name: string }>()
+export const gearToggled = event<{ characterId: string, id: string }>()
+export const gearAdded = event<{ characterId: string, itemId: string }>()
+export const gearRemoved = event<{ characterId: string, id: string }>()
 export const portraitChosen = event<{ characterId: string, file: File }>()
 export const mapFileChosen = event<File>()
 export const featureUsed = event<{ characterId: string, featureId: string }>()
@@ -115,6 +122,8 @@ export const bonusChanged = event<string | number>()
 export const diceRollRequested = event<void>()
 export const diceReset = event<void>()
 export const checkRolled = event<CheckMode>()
+export const sheetRollModeChosen = event<SheetRollMode>()
+export const sheetCheckRolled = event<{ label: string, bonus: number, exhaustion: number }>()
 export const campaignsOpened = event<void>()
 export const characterOpened = event<void>()
 export const combatStarted = event<void>()
@@ -133,7 +142,11 @@ export const tokenStatsSaved = event<{
   ac: number
   speed: number
   attacks: AttackDef[]
+  abilities: Abilities | null
+  saves: SaveOverrides | null
+  inventory: InventoryItem[]
 }>()
+export const monsterCheckRolled = event<{ tokenId: string, ability: Ability, kind: 'check' | 'save' }>()
 export const tokenImageChosen = event<{ tokenId: string, file: File }>()
 
 const checkLabelByMode = {
@@ -425,6 +438,51 @@ export function bootTableModel() {
       },
     })
     reaction({
+      on: gearToggled,
+      run({ characterId, id }) {
+        const sheet = characterById(characterId)
+        const current = sheet?.inventory.find(item => item.id === id)
+        if (!sheet || !current || current.kind === 'gear')
+          return
+        patchCharacter(characterId, {
+          inventory: sheet.inventory.map(item => ({
+            ...item,
+            equipped: equippedAfterToggle(item, current, !current.equipped),
+          })),
+        })
+      },
+    })
+    reaction({
+      on: gearAdded,
+      run({ characterId, itemId }) {
+        const sheet = characterById(characterId)
+        const gear = gearByItemId(itemId)
+        if (!sheet || !gear)
+          return
+        patchCharacter(characterId, {
+          inventory: [...sheet.inventory, {
+            id: crypto.randomUUID(),
+            itemId,
+            name: gear.name,
+            quantity: 1,
+            kind: gear.stats.kind,
+            equipped: false,
+          }],
+        })
+      },
+    })
+    reaction({
+      on: gearRemoved,
+      run({ characterId, id }) {
+        const sheet = characterById(characterId)
+        if (!sheet)
+          return
+        patchCharacter(characterId, {
+          inventory: sheet.inventory.filter(item => item.id !== id || item.kind === 'gear'),
+        })
+      },
+    })
+    reaction({
       on: portraitChosen,
       run({ characterId, file }) {
         const base = campaignBase()
@@ -563,6 +621,24 @@ export function bootTableModel() {
       },
     })
     reaction({
+      on: sheetRollModeChosen,
+      run(mode) {
+        sheetRollMode.value = mode
+      },
+    })
+    reaction({
+      on: sheetCheckRolled,
+      run(check) {
+        void sendLiveFx({
+          type: 'roll',
+          label: check.label,
+          formula: d20Formula(check.bonus),
+          mode: sheetRollMode.value,
+          exhaustion: check.exhaustion,
+        })
+      },
+    })
+    reaction({
       on: campaignsOpened,
       run() {
         void homeRoute.open({})
@@ -636,6 +712,28 @@ export function bootTableModel() {
       },
     })
     reaction({
+      on: monsterCheckRolled,
+      run({ tokenId, ability, kind }) {
+        const token = liveSnapshot.value?.tokens.find(item => item.id === tokenId)
+        if (!token?.abilities)
+          return
+        const bonusByKind = {
+          check: abilityModifier(token.abilities[ability]),
+          save: saveBonus(token.abilities, token.saves ?? {}, ability),
+        } as const
+        const labelByKind = {
+          check: abilityLabel[ability],
+          save: `Спас ${abilityLabel[ability]}`,
+        } as const
+        void sendLiveFx({
+          type: 'roll',
+          label: labelByKind[kind],
+          formula: d20Formula(bonusByKind[kind]),
+          mode: sheetRollMode.value,
+        })
+      },
+    })
+    reaction({
       on: tokenStatsSaved,
       run(patch) {
         const base = campaignBase()
@@ -664,6 +762,14 @@ function campaignBase() {
   return id ? `/api/campaigns/${id}` : null
 }
 
+function equippedAfterToggle(item: { id: string, kind: string, equipped: boolean }, current: { id: string, kind: string }, equipped: boolean) {
+  if (item.id === current.id)
+    return equipped
+  if (equipped && item.kind === current.kind && (current.kind === 'armor' || current.kind === 'shield'))
+    return false
+  return item.equipped
+}
+
 function characterById(characterId: string) {
   return liveSnapshot.value?.characters.find(item => item.id === characterId) ?? null
 }
@@ -688,6 +794,8 @@ function placedMonster(body: Record<string, unknown>) {
     ac: readArmorClass(body) ?? 10,
     speed,
     attacks: readAttacks(body),
+    abilities: readAbilities(body.abilities),
+    saves: readSaveOverrides(body.saves),
   }
 }
 

@@ -6,6 +6,7 @@ export const SRD_ATTRIBUTION
 
 export type CampaignRole = 'dm' | 'player'
 export type Ability = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+export type SaveOverrides = Partial<Record<Ability, number>>
 export type DiceMode = 'normal' | 'advantage' | 'disadvantage' | 'crit'
 export type SrdKind = 'class' | 'species' | 'background' | 'feat' | 'spell' | 'monster' | 'item'
 export type RestKind = 'short' | 'long'
@@ -55,10 +56,36 @@ export interface DeathSaves {
   failures: number
 }
 
+export const itemKinds = ['weapon', 'armor', 'shield', 'gear'] as const
+export type ItemKind = (typeof itemKinds)[number]
+export type GearAbility = Ability | 'finesse'
+
+export interface WeaponStats {
+  kind: 'weapon'
+  dice: string
+  damageType: string
+  ability: GearAbility
+}
+
+export interface ArmorStats {
+  kind: 'armor'
+  base: number
+  dexCap: number | null
+}
+
+export interface ShieldStats {
+  kind: 'shield'
+}
+
+export type GearStats = WeaponStats | ArmorStats | ShieldStats
+
 export interface InventoryItem {
   id: string
+  itemId: string
   name: string
   quantity: number
+  kind: ItemKind
+  equipped: boolean
 }
 
 export const abilities = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
@@ -70,4 +97,69 @@ export const abilityLabel: Record<Ability, string> = {
   int: 'Интеллект',
   wis: 'Мудрость',
   cha: 'Харизма',
+}
+
+export const skills = [
+  'acrobatics',
+  'animal-handling',
+  'arcana',
+  'athletics',
+  'deception',
+  'history',
+  'insight',
+  'intimidation',
+  'investigation',
+  'medicine',
+  'nature',
+  'perception',
+  'performance',
+  'persuasion',
+  'religion',
+  'sleight-of-hand',
+  'stealth',
+  'survival',
+] as const
+
+export type Skill = typeof skills[number]
+
+export const skillAbility: Record<Skill, Ability> = {
+  'acrobatics': 'dex',
+  'animal-handling': 'wis',
+  'arcana': 'int',
+  'athletics': 'str',
+  'deception': 'cha',
+  'history': 'int',
+  'insight': 'wis',
+  'intimidation': 'cha',
+  'investigation': 'int',
+  'medicine': 'wis',
+  'nature': 'int',
+  'perception': 'wis',
+  'performance': 'cha',
+  'persuasion': 'cha',
+  'religion': 'int',
+  'sleight-of-hand': 'dex',
+  'stealth': 'dex',
+  'survival': 'wis',
+}
+
+export const skillLabel: Record<Skill, string> = {
+  'acrobatics': 'Акробатика',
+  'animal-handling': 'Уход за животными',
+  'arcana': 'Магия',
+  'athletics': 'Атлетика',
+  'deception': 'Обман',
+  'history': 'История',
+  'insight': 'Проницательность',
+  'intimidation': 'Запугивание',
+  'investigation': 'Расследование',
+  'medicine': 'Медицина',
+  'nature': 'Природа',
+  'perception': 'Восприятие',
+  'performance': 'Выступление',
+  'persuasion': 'Убеждение',
+  'religion': 'Религия',
+  'sleight-of-hand': 'Ловкость рук',
+  'stealth': 'Скрытность',
+  'survival': 'Выживание',
 }

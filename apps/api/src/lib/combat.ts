@@ -1,9 +1,9 @@
-import type { AttackDef } from '@dnd/shared'
+import type { Abilities, AttackDef, InventoryItem, SaveOverrides } from '@dnd/shared'
 import { readArmorClass, resolveAttack, srdCatalog } from '@dnd/shared'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db'
 import { characters, combatants, combats, scenes, tokens } from '../db/schema'
-import { loadCombat, saveRoll } from './table'
+import { armorFromCharacter, loadCombat, saveRoll } from './table'
 
 export async function updateTokenStats(tokenId: string, patch: {
   name: string
@@ -11,6 +11,9 @@ export async function updateTokenStats(tokenId: string, patch: {
   ac: number
   speed: number
   attacks: AttackDef[]
+  abilities: Abilities | null
+  saves: SaveOverrides | null
+  inventory: InventoryItem[]
 }) {
   const [current] = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1)
   if (!current)
@@ -23,6 +26,9 @@ export async function updateTokenStats(tokenId: string, patch: {
     ac: patch.ac,
     speed: patch.speed,
     attacks: patch.attacks,
+    abilities: patch.abilities,
+    saves: patch.saves,
+    inventory: patch.inventory,
   }).where(eq(tokens.id, tokenId)).returning()
   await db.update(combatants).set({
     name: row.name,
@@ -112,7 +118,7 @@ async function tokenInCampaign(tokenId: string, campaignId: string) {
 async function armorOf(token: { characterId: string | null, monsterId: string | null, name: string, ac: number | null }) {
   if (token.characterId) {
     const [sheet] = await db.select().from(characters).where(eq(characters.id, token.characterId)).limit(1)
-    return sheet?.ac ?? null
+    return sheet ? armorFromCharacter(sheet) : null
   }
   if (token.ac != null)
     return token.ac

@@ -1,17 +1,25 @@
-import type { Abilities, AttackDef, CampaignRole, CharacterDto, CombatDto, DiceRollDto, DieTerm, SceneDto, SnapshotDto, TokenDto } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, CampaignRole, CharacterDto, CombatDto, DiceRollDto, DieTerm, SceneDto, Skill, SnapshotDto, TokenDto } from '@dnd/shared'
 import {
+  abilities,
   abilityModifier,
   armorClass,
   concealEnemies,
+  equipmentSheet,
+  gearByItemId,
   hitDieHeal,
   hitDieSidesForClass,
   isDeadFromExhaustion,
   longRestExhaustion,
+  readAbilities,
   readDiceFormula,
+  readInventory,
+  readSaveOverrides,
   readSpellIds,
   rollD20,
   rollDamage,
   rollFormula,
+  skillOfferForClass,
+  skills,
   srdCatalog,
 } from '@dnd/shared'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
@@ -39,11 +47,43 @@ function asAbilities(value: unknown): Abilities {
   return row
 }
 
+function asAbilityList(value: unknown): Ability[] {
+  if (!Array.isArray(value))
+    return []
+  return value.filter((item): item is Ability => typeof item === 'string' && (abilities as readonly string[]).includes(item))
+}
+
+function asSkillList(value: unknown): Skill[] {
+  if (!Array.isArray(value))
+    return []
+  return value.filter((item): item is Skill => typeof item === 'string' && (skills as readonly string[]).includes(item))
+}
+
 function asAttacks(value: unknown): AttackDef[] {
   return Array.isArray(value) ? value as AttackDef[] : []
 }
 
+function gearOfRow(row: Pick<CharacterRow, 'abilities' | 'level' | 'inventory' | 'attacks'>) {
+  return equipmentSheet({
+    abilities: asAbilities(row.abilities),
+    level: row.level,
+    inventory: readInventory(row.inventory),
+    attacks: asAttacks(row.attacks),
+    gearOf: gearByItemId,
+  })
+}
+
+export function armorFromCharacter(row: Pick<CharacterRow, 'abilities' | 'level' | 'inventory' | 'attacks'>) {
+  return gearOfRow(row).ac
+}
+
+export function gearFields(row: Pick<CharacterRow, 'abilities' | 'level' | 'attacks'>, inventory: unknown) {
+  const gear = gearOfRow({ ...row, inventory })
+  return { inventory: gear.inventory, ac: gear.ac, attacks: gear.attacks }
+}
+
 export function toCharacterDto(row: CharacterRow): CharacterDto {
+  const gear = gearOfRow(row)
   return {
     id: row.id,
     campaignId: row.campaignId,
@@ -55,19 +95,21 @@ export function toCharacterDto(row: CharacterRow): CharacterDto {
     backgroundId: row.backgroundId,
     level: row.level,
     abilities: asAbilities(row.abilities),
+    skillProficiencies: asSkillList(row.skillProficiencies),
+    saveProficiencies: saveProficienciesOf(row),
     hpCurrent: row.hpCurrent,
     hpMax: row.hpMax,
     hpTemp: row.hpTemp,
-    ac: row.ac,
+    ac: gear.ac,
     speed: row.speed,
-    attacks: asAttacks(row.attacks),
+    attacks: gear.attacks,
     spells: Array.isArray(row.spells) ? row.spells as CharacterDto['spells'] : [],
     slots: Array.isArray(row.slots) ? row.slots as CharacterDto['slots'] : [],
     conditions: Array.isArray(row.conditions) ? row.conditions as string[] : [],
     heroicInspiration: row.heroicInspiration,
     exhaustion: row.exhaustion,
     deathSaves: row.deathSaves as CharacterDto['deathSaves'],
-    inventory: Array.isArray(row.inventory) ? row.inventory as CharacterDto['inventory'] : [],
+    inventory: gear.inventory,
     weaponMasteries: Array.isArray(row.weaponMasteries) ? row.weaponMasteries as string[] : [],
     hitDie: row.hitDie,
     hitDiceRemaining: row.hitDiceRemaining,
@@ -107,9 +149,34 @@ export function toTokenDto(row: TokenRow, characterAvatarPath: string | null = n
     ac: row.ac,
     speed: row.speed,
     attacks: asAttacks(row.attacks),
+    ...tokenScores(row),
+    inventory: readInventory(row.inventory),
     imageUrl: tokenImageUrl(row, characterAvatarPath),
     obscured: false,
   }
+}
+
+export function monsterTokenScores(monsterId: string | null | undefined) {
+  if (!monsterId)
+    return null
+  const entry = srd(monsterId)
+  if (!entry)
+    return null
+  const abilities = readAbilities(entry.body.abilities)
+  if (!abilities)
+    return null
+  return { abilities, saves: readSaveOverrides(entry.body.saves) }
+}
+
+function tokenScores(row: TokenRow) {
+  const stored = readAbilities(row.abilities)
+  if (stored)
+    return { abilities: stored, saves: readSaveOverrides(row.saves) }
+  const entry = row.monsterId ? srd(row.monsterId) : null
+  const catalog = readAbilities(entry?.body.abilities)
+  if (!catalog)
+    return { abilities: null, saves: null }
+  return { abilities: catalog, saves: readSaveOverrides(entry?.body.saves) }
 }
 
 function tokenImageUrl(row: TokenRow, characterAvatarPath: string | null) {
@@ -135,6 +202,13 @@ function srd(id: string) {
   return srdCatalog.find(entry => entry.id === id)
 }
 
+function saveProficienciesOf(row: CharacterRow) {
+  const stored = asAbilityList(row.saveProficiencies)
+  if (stored.length > 0)
+    return stored
+  return asAbilityList(srd(row.classId)?.body.saves)
+}
+
 export async function createCharacter(input: {
   campaignId: string
   userId: string
@@ -143,11 +217,20 @@ export async function createCharacter(input: {
   classId: string
   backgroundId: string
   abilities: Abilities
+  skillProficiencies: Skill[]
 }) {
   const classEntry = srd(input.classId)
   const species = srd(input.speciesId)
   const background = srd(input.backgroundId)
   if (!classEntry || classEntry.kind !== 'class' || !species || !background)
+    return null
+  const offer = skillOfferForClass(input.classId)
+  const picked = input.skillProficiencies
+  const allowed = new Set(offer?.skills ?? [])
+  if (!offer || picked.length !== offer.skillChoices || picked.some(skill => !allowed.has(skill)))
+    return null
+  const saveProficiencies = asAbilityList(classEntry.body.saves)
+  if (saveProficiencies.length === 0)
     return null
   const hitDie = String(classEntry.body.hitDie ?? 'd8')
   const sides = hitDieSidesForClass(hitDie)
@@ -156,9 +239,6 @@ export async function createCharacter(input: {
   const speed = Number(species.body.speed ?? 30)
   const featId = String(background.body.originFeatId ?? '')
   const casting = (classEntry.body.casting as CharacterDto['castingAbility']) ?? null
-  const weapon = classEntry.body.weaponMastery
-    ? [{ id: 'longsword', name: 'Длинный меч', attackBonus: abilityModifier(input.abilities.str) + 2, damageDice: '1d8', damageBonus: abilityModifier(input.abilities.str), damageType: 'рубящий' }]
-    : []
   const spellAttack = casting
     ? [{
         id: 'spell',
@@ -186,16 +266,20 @@ export async function createCharacter(input: {
     subclassId: String(classEntry.body.subclassId ?? input.classId),
     backgroundId: input.backgroundId,
     abilities: input.abilities,
+    skillProficiencies: picked,
+    saveProficiencies,
     hpCurrent: hpMax,
     hpMax,
-    ac: armorClass({ abilities: input.abilities, base: 11 }),
+    ac: armorClass({ abilities: input.abilities }),
     speed,
-    attacks: [...weapon, ...spellAttack],
+    attacks: spellAttack,
     spells: knownSpells,
     slots: casting ? [{ level: 1, max: 2, spent: 0 }] : [],
     conditions: [],
     deathSaves: { successes: 0, failures: 0 },
-    inventory: featId ? [{ id: featId, name: 'Черта происхождения', quantity: 1 }] : [],
+    inventory: featId
+      ? [{ id: featId, itemId: featId, name: 'Черта происхождения', quantity: 1, kind: 'gear' as const, equipped: false }]
+      : [],
     weaponMasteries: classEntry.body.weaponMastery ? ['отталкивание'] : [],
     hitDie,
     hitDiceRemaining: 1,
@@ -351,6 +435,9 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
       ac: null,
       speed: null,
       attacks: [],
+      abilities: null,
+      saves: null,
+      inventory: [],
       imageUrl: null,
       color: '#2a2436',
       obscured: true,
