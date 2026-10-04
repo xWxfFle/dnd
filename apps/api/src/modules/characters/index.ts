@@ -1,10 +1,11 @@
+import type { Abilities } from '@dnd/shared'
 import { createCharacterSchema, restSchema, updateCharacterSchema } from '@dnd/shared'
 import { eq, inArray } from 'drizzle-orm'
 import { status } from 'elysia'
 import { db } from '../../db'
 import { characters, combatants, tokens } from '../../db/schema'
 import { deleteToken } from '../../lib/combat'
-import { applyRest, createCharacter, gearFields, toCharacterDto } from '../../lib/table'
+import { abilitySheet, applyRest, createCharacter, gearFields, levelUpCharacter, mirrorSheetHp, sheetPatchForRole, toCharacterDto } from '../../lib/table'
 import { rejectUnlessImage, uploadName, writeUpload } from '../../lib/uploads'
 import { broadcast } from '../../live/hub'
 import { campaignRoutes } from '../../plugins/campaign-access'
@@ -64,7 +65,8 @@ export const charactersModule = campaignRoutes('campaign-characters')
     if (!current)
       return status(404, { error: 'Not found' })
     const { kind, name, ...rest } = body
-    const patch: typeof rest & { kind?: 'hero' | 'custom', name?: string } = { ...rest }
+    const gated = sheetPatchForRole(role, rest)
+    const patch: typeof rest & { kind?: 'hero' | 'custom', name?: string } = { ...gated }
     if (kind && role === 'dm' && current.userId === userId)
       patch.kind = kind
     if (name != null) {
@@ -73,8 +75,20 @@ export const charactersModule = campaignRoutes('campaign-characters')
         return status(422, { error: 'Пустое имя' })
       patch.name = trimmed
     }
-    const next = patch.inventory ? { ...patch, ...gearFields(current, patch.inventory) } : patch
+    const scored = patch.abilities ? abilitySheet(current, patch.abilities as Abilities) : null
+    const geared = patch.inventory && !scored ? gearFields(current, patch.inventory) : null
+    const hpPatch = typeof patch.hpMax === 'number'
+      ? { hpMax: patch.hpMax, hpCurrent: Math.min(current.hpCurrent, patch.hpMax) }
+      : null
+    const next = {
+      ...patch,
+      ...geared,
+      ...scored,
+      ...hpPatch,
+    }
     const [updated] = await db.update(characters).set(next).where(eq(characters.id, params.characterId)).returning()
+    if (hpPatch)
+      await mirrorSheetHp(params.characterId, hpPatch.hpCurrent, hpPatch.hpMax)
     if (patch.name && patch.name !== current.name)
       await renamePlaced(params.characterId, patch.name)
     await broadcast(params.id)
@@ -83,6 +97,19 @@ export const charactersModule = campaignRoutes('campaign-characters')
     member: true,
     params: characterParams,
     body: updateCharacterSchema,
+  })
+  .post('/:id/characters/:characterId/level', async ({ userId, params, role }) => {
+    const current = await loadCharacter(params.id, params.characterId, userId, role)
+    if (!current)
+      return status(404, { error: 'Not found' })
+    const updated = await levelUpCharacter(current)
+    if (!updated)
+      return status(422, { error: 'Уже 20 уровень' })
+    await broadcast(params.id)
+    return toCharacterDto(updated)
+  }, {
+    member: true,
+    params: characterParams,
   })
   .post('/:id/characters/:characterId/rest', async ({ userId, params, body, role }) => {
     const current = await loadCharacter(params.id, params.characterId, userId, role)

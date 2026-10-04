@@ -1,10 +1,10 @@
 import type { CharacterDto } from '@dnd/shared'
 import type { SheetRollMode } from './model'
 import { abilities, abilityLabel, abilityModifier, attackBonus, skillAbility, skillLabel, skills } from '@dnd/shared'
-import { Button, Group, Stack, Text } from '@mantine/core'
+import { Button, Checkbox, Group, Stack, Text } from '@mantine/core'
 import { useUnit } from '@virentia/react'
 import { liveSnapshot } from './live'
-import { sheetCheckRolled, sheetRollMode, sheetRollModeChosen, sheetRollModes } from './model'
+import { dm, sheetCheckRolled, sheetRollMode, sheetRollModeChosen, sheetRollModes, skillProficiencyToggled } from './model'
 
 const rollModeLabel = {
   normal: 'Обычно',
@@ -29,9 +29,11 @@ export function RollModePicker() {
 }
 
 export function SkillRolls(props: { sheet: CharacterDto }) {
-  const { roll, snapshot } = useUnit({
+  const { roll, snapshot, master, toggleSkill } = useUnit({
     roll: sheetCheckRolled,
     snapshot: liveSnapshot,
+    master: dm,
+    toggleSkill: skillProficiencyToggled,
   })
   const latest = snapshot?.rolls.at(-1)
   const sheet = props.sheet
@@ -60,6 +62,20 @@ export function SkillRolls(props: { sheet: CharacterDto }) {
         ))}
       </Group>
       <Text size="xs">Навыки</Text>
+      {master && (
+        <Stack gap={4}>
+          <Text size="xs" c="dimmed">Владение — ставит мастер</Text>
+          {skills.map(skill => (
+            <Checkbox
+              key={skill}
+              size="xs"
+              label={skillLabel[skill]}
+              checked={sheet.skillProficiencies.includes(skill)}
+              onChange={() => toggleSkill({ characterId: sheet.id, skill })}
+            />
+          ))}
+        </Stack>
+      )}
       <Group gap="xs">
         {skills.map((skill) => {
           const bonus = attackBonus(sheet.abilities, skillAbility[skill], sheet.level, sheet.skillProficiencies.includes(skill))

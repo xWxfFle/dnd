@@ -1,5 +1,4 @@
 import type { Skill } from '@dnd/shared'
-import { skillChoiceForOrigin } from '@dnd/shared'
 import { reaction, scoped } from '@virentia/core'
 import { createField, createForm, createWizardForm, readStoreSnapshot, step } from '@virentia/forms'
 
@@ -47,17 +46,9 @@ const classIdField = createField('class-fighter')
 const backgroundIdField = createField('background-soldier')
 
 const skillsField = createField<Skill[]>([], {
-  validate(value, ctx) {
-    const choice = skillChoiceForOrigin(String(ctx.read(classIdField.state)), String(ctx.read(backgroundIdField.state)))
-    if (!choice)
-      return 'Неизвестный класс'
+  validate(value) {
     if (new Set(value).size !== value.length)
       return 'Навыки без повторов'
-    const allowed = new Set<string>(choice.skills)
-    if (value.some(skill => !allowed.has(skill)))
-      return 'Навык не из списка класса'
-    if (value.length !== choice.skillChoices)
-      return `Нужно навыков от класса: ${choice.skillChoices}`
     return null
   },
 })
@@ -131,20 +122,6 @@ export function bootClient() {
       on: joinMutation.doneData,
       run(campaign) {
         void tableRoute.open({ params: { id: campaign.id }, replace: true })
-      },
-    })
-    reaction({
-      on: classIdField.changed,
-      run() {
-        void skillsField.fill([])
-      },
-    })
-    reaction({
-      on: backgroundIdField.changed,
-      run() {
-        const choice = skillChoiceForOrigin(classIdField.read(), backgroundIdField.read())
-        const allowed = new Set(choice?.skills ?? [])
-        void skillsField.fill(skillsField.read().filter(skill => allowed.has(skill)))
       },
     })
     reaction({

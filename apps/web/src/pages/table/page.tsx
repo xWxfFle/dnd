@@ -13,6 +13,7 @@ import { liveSnapshot } from '@/pages/table/live'
 import { SkillRolls } from '@/pages/table/skill-rolls'
 import { AccountMenu } from '@/shared/ui/account-menu'
 import {
+  abilityScoreEdited,
   attackRolled,
   campaignsOpened,
   catalogNames,
@@ -44,9 +45,11 @@ import {
   heroRenamed,
   hexFacing,
   hexFacingChanged,
+  hpMaxEdited,
   imageScale,
   imageScaleChanged,
   inspirationToggled,
+  levelUpRequested,
   mapFileChosen,
   mapMeasured,
   mapName,
@@ -83,6 +86,7 @@ import {
   viewerId,
 } from './model'
 import { MonsterEdit } from './monster-edit'
+import { PresetPanel } from './preset-panel'
 
 const tableWash = {
   overflow: 'hidden',
@@ -403,6 +407,8 @@ function ActorsPanel(props: { onOpenHero: (characterId: string) => void, onOpenT
           </Stack>
         </Collapse>
       )}
+      <Divider />
+      <PresetPanel sceneReady={sceneReady} />
       {mobs.map(token => (
         <Button key={token.id} size="xs" variant="subtle" fullWidth onClick={() => props.onOpenToken(token.id)} c={token.hpCurrent <= 0 ? 'red' : undefined}>
           {`${token.name} · ${token.hpCurrent}/${token.hpMax}${token.hpCurrent <= 0 ? ' · мёртв' : ''}`}
@@ -567,7 +573,7 @@ function TableSetup() {
 }
 
 function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady: boolean }) {
-  const { toggle, rest, catalog, rollAttack, tokens, master, viewer, pendingHeroDelete, deleteHero, renameHero, chooseKind } = useUnit({
+  const { toggle, rest, catalog, rollAttack, tokens, master, viewer, pendingHeroDelete, deleteHero, renameHero, chooseKind, raiseLevel, editHpMax } = useUnit({
     toggle: characterPlacementToggled,
     rest: restRequested,
     catalog: catalogNames,
@@ -579,6 +585,8 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
     deleteHero: heroDeletePressed,
     renameHero: heroRenamed,
     chooseKind: heroKindChosen,
+    raiseLevel: levelUpRequested,
+    editHpMax: hpMaxEdited,
   })
   const sheet = props.sheet
   const editable = master || sheet.userId === viewer
@@ -596,7 +604,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
       <Tabs.Panel value="overview" pt="sm">
         <Stack gap="sm" align="flex-start">
           <Group gap="sm" wrap="nowrap" align="flex-start">
-            <Avatar src={sheet.avatarUrl ?? undefined} alt="" size="lg" radius="xl" />
+            <Avatar key={sheet.avatarUrl ?? sheet.id} src={sheet.avatarUrl ?? undefined} alt="" size="lg" radius="xl" />
             <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
               {editable
                 ? (
@@ -621,6 +629,22 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
               {ownSheet && sheet.kind === 'custom' && <Text size="xs" c="dimmed">Игроки не видят его в списке.</Text>}
               <Text size="sm">{sheetTitle(sheet, catalog)}</Text>
               <Text size="sm">{`КД ${sheet.ac} · ${sheet.speed} фт`}</Text>
+              {editable && sheet.level < 20 && (
+                <Button size="xs" variant="light" onClick={() => raiseLevel(sheet.id)}>Новый уровень</Button>
+              )}
+              {master && (
+                <NumberInput
+                  key={`${sheet.id}:${sheet.hpMax}`}
+                  size="xs"
+                  w={120}
+                  label="Максимум хитов"
+                  min={1}
+                  max={999}
+                  allowDecimal={false}
+                  defaultValue={sheet.hpMax}
+                  onBlur={event => editHpMax({ characterId: sheet.id, hpMax: readInt(event.currentTarget.value, sheet.hpMax) })}
+                />
+              )}
             </Stack>
           </Group>
           <Stack gap={4} w={360}>
@@ -642,7 +666,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
       </Tabs.Panel>
       <Tabs.Panel value="checks" pt="sm">
         <Stack gap="sm" align="flex-start">
-          <AbilityScores abilities={sheet.abilities} />
+          <AbilityScores sheet={sheet} master={master} />
           {editable && <SkillRolls sheet={sheet} />}
         </Stack>
       </Tabs.Panel>
@@ -729,18 +753,47 @@ function modifierText(score: number) {
   return String(mod)
 }
 
-function AbilityScores(props: { abilities: CharacterDto['abilities'] }) {
+function AbilityScores(props: { sheet: CharacterDto, master: boolean }) {
+  const edit = useUnit(abilityScoreEdited)
+  if (!props.master) {
+    return (
+      <Group gap="xs" grow>
+        {abilityOrder.map(key => (
+          <Stack key={key} gap={0} align="center">
+            <Text size="xs" c="dimmed">{abilityLabel[key]}</Text>
+            <Text size="sm" fw={700}>{modifierText(props.sheet.abilities[key])}</Text>
+            <Text size="xs">{String(props.sheet.abilities[key])}</Text>
+          </Stack>
+        ))}
+      </Group>
+    )
+  }
   return (
-    <Group gap="xs" grow>
+    <Group gap="xs">
       {abilityOrder.map(key => (
-        <Stack key={key} gap={0} align="center">
-          <Text size="xs" c="dimmed">{abilityLabel[key]}</Text>
-          <Text size="sm" fw={700}>{modifierText(props.abilities[key])}</Text>
-          <Text size="xs">{String(props.abilities[key])}</Text>
-        </Stack>
+        <NumberInput
+          key={`${props.sheet.id}:${key}:${props.sheet.abilities[key]}`}
+          size="xs"
+          w={72}
+          label={abilityLabel[key]}
+          min={1}
+          max={30}
+          allowDecimal={false}
+          defaultValue={props.sheet.abilities[key]}
+          onBlur={event => edit({
+            characterId: props.sheet.id,
+            ability: key,
+            score: readInt(event.currentTarget.value, props.sheet.abilities[key]),
+          })}
+        />
       ))}
     </Group>
   )
+}
+
+function readInt(value: string, fallback: number) {
+  const next = Number(value)
+  return Number.isFinite(next) ? Math.trunc(next) : fallback
 }
 
 function SheetTrackers(props: { sheet: CharacterDto }) {

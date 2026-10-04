@@ -92,6 +92,14 @@ export function CharacterPage() {
   )
 }
 
+function skillHint(skill: string, granted: Set<string>, offered: Set<string>) {
+  if (granted.has(skill))
+    return ' · предыстория'
+  if (offered.has(skill))
+    return ' · класс'
+  return ''
+}
+
 function SkillChoices(props: {
   classId: string
   backgroundId: string
@@ -104,26 +112,21 @@ function SkillChoices(props: {
   const offered = new Set<string>(choice?.skills ?? [])
   const choices = choice?.skillChoices ?? 0
   const toggle = (skill: Skill) => {
-    if (!offered.has(skill))
-      return
     if (props.picked.includes(skill)) {
       props.onChange(props.picked.filter(item => item !== skill))
       return
     }
-    if (props.picked.length >= choices)
-      return
     props.onChange([...props.picked, skill])
   }
   return (
     <Stack gap="xs">
-      <Text size="sm">{`Предыстория уже даёт владение. От класса ${props.picked.length} из ${choices}.`}</Text>
+      <Text size="sm">{`Любые навыки, сейчас ${props.picked.length}. Класс обычно даёт ${choices} — мастер подскажет.`}</Text>
       {props.error && <Text size="sm" c="red">{props.error}</Text>}
       {skills.map(skill => (
         <Checkbox
           key={skill}
-          label={granted.has(skill) ? `${skillLabel[skill]} · предыстория` : skillLabel[skill]}
-          checked={granted.has(skill) || props.picked.includes(skill)}
-          disabled={!offered.has(skill)}
+          label={`${skillLabel[skill]}${skillHint(skill, granted, offered)}`}
+          checked={props.picked.includes(skill)}
           onChange={() => toggle(skill)}
         />
       ))}

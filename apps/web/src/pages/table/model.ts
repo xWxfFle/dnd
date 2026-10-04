@@ -1,5 +1,5 @@
-import type { Abilities, Ability, AttackDef, InventoryItem, SaveOverrides } from '@dnd/shared'
-import { abilityLabel, abilityModifier, d20Formula, formatDiceFormula, gearByItemId, parseDice, readAbilities, readArmorClass, readClassFeatures, readDiceFormula, readSaveOverrides, saveBonus } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, CreatePresetInput, InventoryItem, SaveOverrides, Skill } from '@dnd/shared'
+import { abilityLabel, abilityModifier, d20Formula, formatDiceFormula, gearByItemId, parseDice, readAbilities, readArmorClass, readClassFeatures, readDiceFormula, readSaveOverrides, saveBonus, skills } from '@dnd/shared'
 import { computed, effect, event, reaction, scoped, store } from '@virentia/core'
 import { apiSend, srdQuery } from '@/shared/api'
 import { characterRoute, homeRoute, tableRoute } from '@/shared/routing'
@@ -35,6 +35,8 @@ export const dm = computed(() => liveSnapshot.value?.campaign.role === 'dm')
 export const viewerId = computed(() => readUserId())
 
 export const monsters = computed(() => (srdQuery.data.value ?? []).filter(entry => entry.kind === 'monster'))
+
+export const presets = computed(() => liveSnapshot.value?.presets ?? [])
 
 export const roster = computed(() => {
   const snapshot = liveSnapshot.value
@@ -135,6 +137,13 @@ export const gearToggled = event<{ characterId: string, id: string }>()
 export const gearAdded = event<{ characterId: string, itemId: string }>()
 export const gearRemoved = event<{ characterId: string, id: string }>()
 export const portraitChosen = event<{ characterId: string, file: File }>()
+export const levelUpRequested = event<string>()
+export const abilityScoreEdited = event<{ characterId: string, ability: Ability, score: number }>()
+export const hpMaxEdited = event<{ characterId: string, hpMax: number }>()
+export const skillProficiencyToggled = event<{ characterId: string, skill: Skill }>()
+export const presetSaved = event<CreatePresetInput>()
+export const presetRemoved = event<string>()
+export const presetSpawned = event<{ presetId: string, copies: number }>()
 export const mapFileChosen = event<File>()
 export const featureUsed = event<{ characterId: string, featureId: string }>()
 export const spellCast = event<{ characterId: string, spellId: string }>()
@@ -627,6 +636,98 @@ export function bootTableModel() {
         const body = new FormData()
         body.set('file', file)
         void commandFx({ path: `${base}/characters/${characterId}/avatar`, method: 'POST', body })
+      },
+    })
+    reaction({
+      on: levelUpRequested,
+      run(characterId) {
+        const base = campaignBase()
+        const sheet = characterById(characterId)
+        if (!base || !sheet || sheet.level >= 20)
+          return
+        void commandFx({ path: `${base}/characters/${characterId}/level`, method: 'POST' })
+      },
+    })
+    reaction({
+      on: abilityScoreEdited,
+      run({ characterId, ability, score }) {
+        const sheet = characterById(characterId)
+        if (!sheet || !dm.value)
+          return
+        const next = Math.min(30, Math.max(1, Math.trunc(score)))
+        patchCharacter(characterId, { abilities: { ...sheet.abilities, [ability]: next } })
+      },
+    })
+    reaction({
+      on: hpMaxEdited,
+      run({ characterId, hpMax }) {
+        if (!dm.value)
+          return
+        patchCharacter(characterId, { hpMax: Math.min(999, Math.max(1, Math.trunc(hpMax))) })
+      },
+    })
+    reaction({
+      on: skillProficiencyToggled,
+      run({ characterId, skill }) {
+        const sheet = characterById(characterId)
+        if (!sheet || !dm.value || !skills.includes(skill))
+          return
+        const active = sheet.skillProficiencies.includes(skill)
+        patchCharacter(characterId, {
+          skillProficiencies: active
+            ? sheet.skillProficiencies.filter(item => item !== skill)
+            : [...sheet.skillProficiencies, skill],
+        })
+      },
+    })
+    reaction({
+      on: presetSaved,
+      run(body) {
+        const base = campaignBase()
+        if (!base || !dm.value)
+          return
+        void commandFx({ path: `${base}/presets`, method: 'POST', body })
+      },
+    })
+    reaction({
+      on: presetRemoved,
+      run(presetId) {
+        const base = campaignBase()
+        if (!base || !dm.value)
+          return
+        void commandFx({ path: `${base}/presets/${presetId}`, method: 'DELETE' })
+      },
+    })
+    reaction({
+      on: presetSpawned,
+      async run({ presetId, copies }) {
+        const current = scene.value
+        const base = campaignBase()
+        const preset = presets.value.find(item => item.id === presetId)
+        if (!current || !base || !preset || !dm.value)
+          return
+        const count = Math.min(12, Math.max(1, Math.trunc(copies)))
+        const names = copyNames(preset.name, sceneTokens.value, preset.id, count)
+        for (const [index, name] of names.entries()) {
+          await commandFx({
+            path: `${base}/scenes/${current.id}/tokens`,
+            method: 'POST',
+            body: {
+              name,
+              x: 1 + (index % 8),
+              y: 1 + Math.floor(index / 8),
+              hpCurrent: preset.hp,
+              hpMax: preset.hp,
+              color: preset.color,
+              hidden: false,
+              ac: preset.ac,
+              speed: preset.speed,
+              attacks: preset.attacks,
+              abilities: preset.abilities,
+              saves: preset.saves,
+            },
+          })
+        }
       },
     })
     reaction({

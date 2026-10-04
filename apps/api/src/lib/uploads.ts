@@ -36,7 +36,7 @@ export async function imageResponse(filePath: string) {
   const ext = path.extname(filePath).slice(1).toLowerCase()
   return new Response(file, {
     headers: {
-      'cache-control': 'private, max-age=86400',
+      'cache-control': 'private, no-cache',
       'content-type': sniffImage(head) ?? typeByExt[ext] ?? 'application/octet-stream',
     },
   })

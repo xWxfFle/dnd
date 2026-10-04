@@ -1,17 +1,20 @@
-import type { Abilities, Ability, AttackDef, CampaignRole, CharacterDto, CombatDto, DiceRollDto, DieTerm, SceneDto, Skill, SnapshotDto, TokenDto } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, CampaignRole, CharacterDto, CombatDto, CreaturePresetDto, DiceRollDto, DieTerm, SceneDto, Skill, SnapshotDto, SpellSlot, TokenDto } from '@dnd/shared'
 import { statSync } from 'node:fs'
 import {
   abilities,
   abilityModifier,
   acceptSkillChoice,
   armorClass,
+  carrySpellSlots,
   concealEnemies,
   equipmentSheet,
   gearByItemId,
   hitDieHeal,
   hitDieSidesForClass,
+  hitPointsOnLevelUp,
   isDeadFromExhaustion,
   longRestExhaustion,
+  proficiencyBonus,
   readAbilities,
   readDiceFormula,
   readInventory,
@@ -21,6 +24,7 @@ import {
   rollDamage,
   rollFormula,
   skills,
+  spellSlotsForClass,
   srdCatalog,
 } from '@dnd/shared'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
@@ -31,6 +35,7 @@ import {
   characters,
   combatants,
   combats,
+  creaturePresets,
   diceRolls,
   scenes,
   srdEntries,
@@ -121,7 +126,7 @@ export function toCharacterDto(row: CharacterRow): CharacterDto {
     hitDiceRemaining: row.hitDiceRemaining,
     castingAbility: (row.castingAbility as CharacterDto['castingAbility']) ?? null,
     notes: row.notes,
-    avatarUrl: row.avatarPath ? `/api/characters/${row.id}/avatar` : null,
+    avatarUrl: row.avatarPath ? markedUrl(`/api/characters/${row.id}/avatar`, row.avatarPath) : null,
     kind: characterKindByValue[row.kind] ?? 'hero',
   }
 }
@@ -237,7 +242,7 @@ export async function createCharacter(input: {
   const background = srd(input.backgroundId)
   if (!classEntry || classEntry.kind !== 'class' || !species || !background)
     return null
-  const picked = acceptSkillChoice(input.classId, input.backgroundId, input.skillProficiencies)
+  const picked = acceptSkillChoice(input.skillProficiencies)
   if (!picked)
     return null
   const saveProficiencies = asAbilityList(classEntry.body.saves)
@@ -297,6 +302,101 @@ export async function createCharacter(input: {
     castingAbility: casting,
   }).returning()
   return toCharacterDto(row)
+}
+
+const dmStatKeys = ['abilities', 'hpMax', 'hpCurrent', 'ac', 'speed', 'skillProficiencies', 'saveProficiencies', 'level'] as const
+
+export function sheetPatchForRole<T extends Record<string, unknown>>(role: CampaignRole, body: T) {
+  if (role === 'dm')
+    return body
+  const next: Record<string, unknown> = { ...body }
+  for (const key of dmStatKeys)
+    delete next[key]
+  return next as T
+}
+
+function asSlots(value: unknown): SpellSlot[] {
+  if (!Array.isArray(value))
+    return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object')
+      return []
+    const slot = item as SpellSlot
+    if (typeof slot.level !== 'number' || typeof slot.max !== 'number')
+      return []
+    return [{ level: slot.level, max: slot.max, spent: typeof slot.spent === 'number' ? slot.spent : 0 }]
+  })
+}
+
+function withSpellAttack(attacks: AttackDef[], scores: Abilities, casting: string | null, level: number) {
+  if (!casting || !(abilities as readonly string[]).includes(casting))
+    return attacks
+  const ability = casting as Ability
+  const bonus = abilityModifier(scores[ability]) + proficiencyBonus(level)
+  return attacks.map(attack => attack.id === 'spell' ? { ...attack, attackBonus: bonus } : attack)
+}
+
+export async function levelUpCharacter(row: CharacterRow) {
+  if (row.level >= 20)
+    return null
+  const nextLevel = row.level + 1
+  const scores = asAbilities(row.abilities)
+  const gain = hitPointsOnLevelUp(row.hitDie, scores.con)
+  const hpMax = row.hpMax + gain
+  const hpCurrent = row.hpCurrent + gain
+  const gear = gearFields({ abilities: scores, level: nextLevel, attacks: asAttacks(row.attacks) }, row.inventory)
+  const [updated] = await db.update(characters).set({
+    level: nextLevel,
+    hpMax,
+    hpCurrent,
+    hitDiceRemaining: Math.min(nextLevel, row.hitDiceRemaining + 1),
+    slots: carrySpellSlots(asSlots(row.slots), spellSlotsForClass(row.classId, nextLevel)),
+    ac: gear.ac,
+    attacks: withSpellAttack(gear.attacks, scores, row.castingAbility, nextLevel),
+    inventory: gear.inventory,
+  }).where(eq(characters.id, row.id)).returning()
+  await mirrorSheetHp(row.id, hpCurrent, hpMax)
+  return updated
+}
+
+export async function mirrorSheetHp(characterId: string, hpCurrent: number, hpMax: number) {
+  const placed = await db.update(tokens).set({ hpCurrent, hpMax }).where(eq(tokens.characterId, characterId)).returning({ id: tokens.id })
+  const ids = placed.map(item => item.id)
+  if (ids.length === 0)
+    return
+  await db.update(combatants).set({ hpCurrent, hpMax }).where(inArray(combatants.tokenId, ids))
+}
+
+export function abilitySheet(row: CharacterRow, scores: Abilities) {
+  const gear = gearFields({ abilities: scores, level: row.level, attacks: asAttacks(row.attacks) }, row.inventory)
+  return {
+    abilities: scores,
+    ac: gear.ac,
+    attacks: withSpellAttack(gear.attacks, scores, row.castingAbility, row.level),
+    inventory: gear.inventory,
+  }
+}
+
+type PresetRow = typeof creaturePresets.$inferSelect
+
+export function toPresetDto(row: PresetRow): CreaturePresetDto {
+  return {
+    id: row.id,
+    campaignId: row.campaignId,
+    name: row.name,
+    ac: row.ac,
+    hp: row.hp,
+    speed: row.speed,
+    attacks: asAttacks(row.attacks),
+    abilities: asAbilities(row.abilities),
+    saves: readSaveOverrides(row.saves),
+    color: row.color,
+  }
+}
+
+export async function listPresets(campaignId: string) {
+  const rows = await db.select().from(creaturePresets).where(eq(creaturePresets.campaignId, campaignId))
+  return rows.map(toPresetDto)
 }
 
 export async function applyRest(characterId: string, kind: 'short' | 'long') {
@@ -469,6 +569,7 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
     combat: concealCombat(combat, concealment),
     rolls: await listRolls(campaignId),
     characters: visibleSheets.map(toCharacterDto),
+    presets: await listPresets(campaignId),
   }
 }
 

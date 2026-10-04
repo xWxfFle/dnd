@@ -505,16 +505,10 @@ export function skillChoiceForOrigin(classId: string, backgroundId: string) {
   }
 }
 
-export function acceptSkillChoice(classId: string, backgroundId: string, chosen: readonly Skill[]) {
-  const choice = skillChoiceForOrigin(classId, backgroundId)
-  if (!choice)
+export function acceptSkillChoice(chosen: readonly Skill[]) {
+  if (new Set(chosen).size !== chosen.length)
     return null
-  if (new Set(chosen).size !== chosen.length || chosen.length !== choice.skillChoices)
-    return null
-  const allowed = new Set<string>(choice.skills)
-  if (chosen.some(skill => !allowed.has(skill)))
-    return null
-  return [...choice.granted, ...chosen]
+  return [...chosen]
 }
 
 export function gearByItemId(itemId: string) {

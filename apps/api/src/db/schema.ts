@@ -79,6 +79,19 @@ export const characters = pgTable('characters', {
   kind: text('kind').notNull().default('hero'),
 })
 
+export const creaturePresets = pgTable('creature_presets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  campaignId: uuid('campaign_id').notNull().references(() => campaigns.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  ac: integer('ac').notNull(),
+  hp: integer('hp').notNull(),
+  speed: integer('speed').notNull(),
+  attacks: jsonb('attacks').notNull().default([]),
+  abilities: jsonb('abilities').notNull(),
+  saves: jsonb('saves').notNull().default({}),
+  color: text('color').notNull().default('#5c4d7a'),
+})
+
 export const scenes = pgTable('scenes', {
   id: uuid('id').defaultRandom().primaryKey(),
   campaignId: uuid('campaign_id').notNull().references(() => campaigns.id, { onDelete: 'cascade' }),

@@ -318,6 +318,30 @@ export const srdEntrySchema = z.object({
   body: z.record(z.string(), z.unknown()),
 })
 
+export const creaturePresetSchema = z.object({
+  id: z.uuid(),
+  campaignId: z.uuid(),
+  name: z.string(),
+  ac: z.number().int(),
+  hp: z.number().int(),
+  speed: z.number().int(),
+  attacks: z.array(attackSchema),
+  abilities: abilitiesSchema,
+  saves: saveOverridesSchema,
+  color: z.string(),
+})
+
+export const createPresetSchema = z.object({
+  name: z.string().min(1).max(80),
+  ac: z.number().int().min(0).max(40),
+  hp: z.number().int().min(1).max(999),
+  speed: z.number().int().min(0).max(200),
+  attacks: z.array(attackSchema).min(1).max(8),
+  abilities: abilitiesSchema,
+  saves: saveOverridesSchema.optional(),
+  color: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+})
+
 export const snapshotSchema = z.object({
   campaign: campaignSchema,
   scenes: z.array(sceneSchema),
@@ -325,6 +349,7 @@ export const snapshotSchema = z.object({
   combat: combatSchema.nullable(),
   rolls: z.array(diceRollSchema),
   characters: z.array(characterSchema),
+  presets: z.array(creaturePresetSchema),
 })
 
 export type RegisterInput = z.infer<typeof registerSchema>
@@ -339,3 +364,5 @@ export type TokenDto = z.infer<typeof tokenSchema>
 export type CombatDto = z.infer<typeof combatSchema>
 export type SnapshotDto = z.infer<typeof snapshotSchema>
 export type SrdEntryDto = z.infer<typeof srdEntrySchema>
+export type CreaturePresetDto = z.infer<typeof creaturePresetSchema>
+export type CreatePresetInput = z.infer<typeof createPresetSchema>

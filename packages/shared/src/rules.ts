@@ -1,4 +1,4 @@
-import type { Abilities, Ability, AttackDef, GearAbility, GearStats, InventoryItem, ItemKind, SaveOverrides } from './types'
+import type { Abilities, Ability, AttackDef, GearAbility, GearStats, InventoryItem, ItemKind, SaveOverrides, SpellSlot } from './types'
 import { abilities as abilityKeys } from './types'
 
 export function abilityModifier(score: number) {
@@ -7,6 +7,119 @@ export function abilityModifier(score: number) {
 
 export function proficiencyBonus(level: number) {
   return Math.ceil(Math.max(1, level) / 4) + 1
+}
+
+export function hitPointsOnLevelUp(hitDie: string, conScore: number) {
+  const sides = hitDieSidesForClass(hitDie)
+  return Math.max(1, Math.floor(sides / 2) + 1 + abilityModifier(conScore))
+}
+
+const casterKindByClassId = {
+  'class-bard': 'full',
+  'class-cleric': 'full',
+  'class-druid': 'full',
+  'class-sorcerer': 'full',
+  'class-wizard': 'full',
+  'class-paladin': 'half',
+  'class-ranger': 'half',
+  'class-warlock': 'pact',
+} as const satisfies Record<string, 'full' | 'half' | 'pact'>
+
+const fullCasterSlots = [
+  [],
+  [2],
+  [3],
+  [4, 2],
+  [4, 3],
+  [4, 3, 2],
+  [4, 3, 3],
+  [4, 3, 3, 1],
+  [4, 3, 3, 2],
+  [4, 3, 3, 3, 1],
+  [4, 3, 3, 3, 2],
+  [4, 3, 3, 3, 2, 1],
+  [4, 3, 3, 3, 2, 1],
+  [4, 3, 3, 3, 2, 1, 1],
+  [4, 3, 3, 3, 2, 1, 1],
+  [4, 3, 3, 3, 2, 1, 1, 1],
+  [4, 3, 3, 3, 2, 1, 1, 1],
+  [4, 3, 3, 3, 2, 1, 1, 1, 1],
+  [4, 3, 3, 3, 3, 1, 1, 1, 1],
+  [4, 3, 3, 3, 3, 2, 1, 1, 1],
+  [4, 3, 3, 3, 3, 2, 2, 1, 1],
+] as const
+
+const halfCasterSlots = [
+  [],
+  [],
+  [2],
+  [3],
+  [3],
+  [4, 2],
+  [4, 2],
+  [4, 3],
+  [4, 3],
+  [4, 3, 2],
+  [4, 3, 2],
+  [4, 3, 3],
+  [4, 3, 3],
+  [4, 3, 3, 1],
+  [4, 3, 3, 1],
+  [4, 3, 3, 2],
+  [4, 3, 3, 2],
+  [4, 3, 3, 3, 1],
+  [4, 3, 3, 3, 1],
+  [4, 3, 3, 3, 2],
+  [4, 3, 3, 3, 2],
+] as const
+
+const slotsByCaster = {
+  full: fullCasterSlots,
+  half: halfCasterSlots,
+} as const
+
+const pactSlots = [
+  null,
+  [1, 1],
+  [2, 1],
+  [2, 2],
+  [2, 2],
+  [2, 3],
+  [2, 3],
+  [2, 4],
+  [2, 4],
+  [2, 5],
+  [2, 5],
+  [3, 5],
+  [3, 5],
+  [3, 5],
+  [3, 5],
+  [3, 5],
+  [3, 5],
+  [4, 5],
+  [4, 5],
+  [4, 5],
+  [4, 5],
+] as const
+
+export function spellSlotsForClass(classId: string, level: number): SpellSlot[] {
+  const step = Math.min(20, Math.max(1, Math.trunc(level)))
+  const kind = casterKindByClassId[classId as keyof typeof casterKindByClassId]
+  if (kind === 'pact') {
+    const pact = pactSlots[step]
+    if (!pact)
+      return []
+    return [{ level: pact[1], max: pact[0], spent: 0 }]
+  }
+  const row = kind ? slotsByCaster[kind][step] : []
+  return row.map((max, index) => ({ level: index + 1, max, spent: 0 }))
+}
+
+export function carrySpellSlots(previous: SpellSlot[], next: SpellSlot[]) {
+  return next.map((slot) => {
+    const old = previous.find(item => item.level === slot.level)
+    return { ...slot, spent: old ? Math.min(old.spent, slot.max) : 0 }
+  })
 }
 
 export function exhaustionD20Penalty(level: number) {
@@ -442,19 +555,21 @@ function coversCell(fog: { points: number[] }[], x: number, y: number) {
 }
 
 function cellInside(points: number[], x: number, y: number) {
-  const square = squareOf(points)
-  if (square)
-    return square.x === x && square.y === y
+  const rect = rectangleOf(points)
+  if (rect)
+    return x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h
   return contains(points, x + 0.5, y + 0.5)
 }
 
-function squareOf(points: number[]) {
+function rectangleOf(points: number[]) {
   const [x, y, x2, y2, x3, y3, x4, y4] = points
-  if (points.length !== 8 || x == null || y == null)
+  if (points.length !== 8 || x == null || y == null || x2 == null || y3 == null)
     return null
-  if (x2 !== x + 1 || y2 !== y || x3 !== x + 1 || y3 !== y + 1 || x4 !== x || y4 !== y + 1)
+  const w = x2 - x
+  const h = y3 - y
+  if (w <= 0 || h <= 0 || y2 !== y || x3 !== x2 || y4 !== y3 || x4 !== x)
     return null
-  return { x, y }
+  return { x, y, w, h }
 }
 
 function contains(points: number[], x: number, y: number) {

@@ -12,6 +12,7 @@ import { authGuard } from '../../plugins/auth-guard'
 import { campaignRoutes } from '../../plugins/campaign-access'
 import { charactersModule } from '../characters'
 import { errorSchema, idParams, inviteParams } from '../params'
+import { presetsModule } from '../presets'
 import { scenesModule } from '../scenes'
 
 function toCampaign(campaign: typeof campaigns.$inferSelect, role: 'dm' | 'player') {
@@ -98,4 +99,5 @@ export const campaignsModule = new Elysia({ prefix: '/campaigns', name: 'campaig
       body: rollRequestSchema,
     }))
   .use(charactersModule)
+  .use(presetsModule)
   .use(scenesModule)
