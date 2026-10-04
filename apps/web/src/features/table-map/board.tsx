@@ -250,10 +250,13 @@ export function MapBoard(props: {
   }
 
   function readCell(event: StagePointerEvent) {
-    const pointer = event.target.getStage()?.getPointerPosition()
+    const stage = event.target.getStage()
+    const pointer = stage?.getPointerPosition()
     if (!pointer)
       return null
-    return cellOf(pointer.x, pointer.y)
+    // Stage scaleX/scaleY: pointer в пикселях canvas, клеткам нужны логические координаты.
+    const scale = zoomRef.current || 1
+    return cellOf(pointer.x / scale, pointer.y / scale)
   }
 
   function onStageMove(event: StagePointerEvent) {
@@ -321,7 +324,8 @@ export function MapBoard(props: {
         const pointer = stage?.getPointerPosition()
         if (!pointer)
           return
-        const aim = cellOf(pointer.x, pointer.y)
+        const scale = zoomRef.current || 1
+        const aim = cellOf(pointer.x / scale, pointer.y / scale)
         const current = fogDragRef.current
         if (!current || sameCell(current.aim, aim))
           return
@@ -441,65 +445,70 @@ export function MapBoard(props: {
         onContextMenu={event => event.preventDefault()}
         style={{ cursor: boardCursor(panning, tool, spaceDown), flex: 1, minHeight: 0, minWidth: 0, overflow: 'auto', width: '100%' }}
       >
-        <div style={{ height: height * zoom, width: width * zoom }}>
-          <div style={{ height, imageRendering: grid.smoothing === 'nearest' ? 'pixelated' : 'auto', transform: `scale(${zoom})`, transformOrigin: '0 0', width }}>
-            <Stage width={width} height={height} style={{ cursor: boardCursor(panning, tool, spaceDown) }} onClick={onStageClick} onMouseDown={onStageDown} onMouseMove={onStageMove}>
-              <Layer imageSmoothingEnabled={grid.smoothing !== 'nearest'}>
-                <Rect name="board" width={width} height={height} fill="#1b1724" />
-                {props.scene.imageUrl && image && mapPixels && (
-                  <MapImage
-                    image={image}
-                    x={picture.x}
-                    y={picture.y}
-                    width={mapPixels.width}
-                    height={mapPixels.height}
-                    listening={false}
-                  />
-                )}
-                <GridLines grid={grid} />
-              </Layer>
-              <Layer listening={false}>
-                <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} />
-              </Layer>
-              <Layer>
-                <CellMarks cells={template} grid={grid} fill={tool === 'ruler' ? 'rgba(143,208,255,0.35)' : 'rgba(212,93,93,0.35)'} />
-                {fogSpan && (
-                  <CellMarks
-                    cells={cellsInSpan(fogSpan)}
-                    grid={grid}
-                    fill={fogErase ? 'rgba(143,208,255,0.35)' : 'rgba(240,213,140,0.45)'}
-                  />
-                )}
-                {tool === 'fog' && hover && !fogDrag && (
-                  <Line points={cellOutline(grid, hover.x, hover.y)} closed stroke="#f0d58c" strokeWidth={2} listening={false} />
-                )}
-                {anchor && hover && aimsWithPointer(tool) && !sameCell(anchor, hover) && (
-                  <Line
-                    points={lineBetween(grid, anchor, hover)}
-                    stroke="#f4efe4"
-                    dash={[6, 4]}
-                    listening={false}
-                  />
-                )}
-                {anchor && tool !== 'move' && tool !== 'fog' && (
-                  <Line points={cellOutline(grid, anchor.x, anchor.y)} closed stroke="#f4efe4" strokeWidth={2} listening={false} />
-                )}
-                {props.tokens.map(token => (
-                  <TokenPiece
-                    key={token.id}
-                    token={token}
-                    grid={grid}
-                    imageUrl={token.obscured ? null : token.imageUrl}
-                    draggable={tool === 'move' && !spaceDown}
-                    onDragged={() => {
-                      draggedRef.current = true
-                    }}
-                    onMoved={props.onTokenMoved}
-                  />
-                ))}
-              </Layer>
-            </Stage>
-          </div>
+        <div style={{ height: height * zoom, imageRendering: grid.smoothing === 'nearest' ? 'pixelated' : 'auto', width: width * zoom }}>
+          <Stage
+            width={width * zoom}
+            height={height * zoom}
+            scaleX={zoom}
+            scaleY={zoom}
+            style={{ cursor: boardCursor(panning, tool, spaceDown) }}
+            onClick={onStageClick}
+            onMouseDown={onStageDown}
+            onMouseMove={onStageMove}
+          >
+            <Layer imageSmoothingEnabled={grid.smoothing !== 'nearest'}>
+              <Rect name="board" width={width} height={height} fill="#1b1724" />
+              {props.scene.imageUrl && image && mapPixels && (
+                <MapImage
+                  image={image}
+                  x={picture.x}
+                  y={picture.y}
+                  width={mapPixels.width}
+                  height={mapPixels.height}
+                  listening={false}
+                />
+              )}
+              <GridLines grid={grid} />
+              <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} />
+            </Layer>
+            <Layer>
+              <CellMarks cells={template} grid={grid} fill={tool === 'ruler' ? 'rgba(143,208,255,0.35)' : 'rgba(212,93,93,0.35)'} />
+              {fogSpan && (
+                <CellMarks
+                  cells={cellsInSpan(fogSpan)}
+                  grid={grid}
+                  fill={fogErase ? 'rgba(143,208,255,0.35)' : 'rgba(240,213,140,0.45)'}
+                />
+              )}
+              {tool === 'fog' && hover && !fogDrag && (
+                <Line points={cellOutline(grid, hover.x, hover.y)} closed stroke="#f0d58c" strokeWidth={2} listening={false} />
+              )}
+              {anchor && hover && aimsWithPointer(tool) && !sameCell(anchor, hover) && (
+                <Line
+                  points={lineBetween(grid, anchor, hover)}
+                  stroke="#f4efe4"
+                  dash={[6, 4]}
+                  listening={false}
+                />
+              )}
+              {anchor && tool !== 'move' && tool !== 'fog' && (
+                <Line points={cellOutline(grid, anchor.x, anchor.y)} closed stroke="#f4efe4" strokeWidth={2} listening={false} />
+              )}
+              {props.tokens.map(token => (
+                <TokenPiece
+                  key={token.id}
+                  token={token}
+                  grid={grid}
+                  imageUrl={token.obscured ? null : token.imageUrl}
+                  draggable={tool === 'move' && !spaceDown}
+                  onDragged={() => {
+                    draggedRef.current = true
+                  }}
+                  onMoved={props.onTokenMoved}
+                />
+              ))}
+            </Layer>
+          </Stage>
         </div>
       </div>
     </div>
@@ -711,7 +720,7 @@ function GridLines(props: { grid: ReturnType<typeof readBoardGrid> }) {
 }
 
 function FogLayer(props: { fog: SceneDto['fog'], grid: ReturnType<typeof readBoardGrid>, dm: boolean }) {
-  const fill = props.dm ? 'rgba(0,0,0,0.72)' : '#05040a'
+  const fill = props.dm ? 'rgba(5, 3, 10, 0.78)' : '#05040a'
   if (props.grid.kind === 'hex')
     return <CellMarks cells={coveredCells(props.fog, props.grid)} grid={props.grid} fill={fill} />
   return (
