@@ -27,15 +27,18 @@ const sizeByTool: Partial<Record<Tool, { label: string, presets: number[] }>> = 
   line: { label: 'Длина линии', presets: [15, 30, 60, 100] },
 }
 
+interface StageNode {
+  name: () => string
+  getParent: () => StageNode | null
+  getStage: () => {
+    getPointerPosition: () => { x: number, y: number } | null
+    setPointersPositions: (event: MouseEvent) => void
+  } | null
+}
+
 interface StagePointerEvent {
   evt: MouseEvent
-  target: {
-    name: () => string
-    getStage: () => {
-      getPointerPosition: () => { x: number, y: number } | null
-      setPointersPositions: (event: MouseEvent) => void
-    } | null
-  }
+  target: StageNode
 }
 
 interface CellPoint {
@@ -68,6 +71,7 @@ export function MapBoard(props: {
   const [fogDrag, setFogDrag] = useState<{ anchor: CellPoint, aim: CellPoint } | null>(null)
   const [zoom, setZoom] = useState(1)
   const [panning, setPanning] = useState(false)
+  const [spaceDown, setSpaceDown] = useState(false)
   const fogDragRef = useRef<{ anchor: CellPoint, aim: CellPoint } | null>(null)
   const fogUpRef = useRef<(() => void) | null>(null)
   const draggedRef = useRef(false)
@@ -76,6 +80,7 @@ export function MapBoard(props: {
   const zoomRef = useRef(zoom)
   const zoomScrollRef = useRef<{ left: number, top: number } | null>(null)
   const panCleanupRef = useRef<(() => void) | null>(null)
+  const spaceRef = useRef(false)
   zoomRef.current = zoom
   const focus = props.focusToken
   const gridRef = useRef(grid)
@@ -140,6 +145,40 @@ export function MapBoard(props: {
 
   useEffect(() => () => {
     panCleanupRef.current?.()
+  }, [])
+
+  useEffect(() => {
+    const typing = (event: KeyboardEvent) => {
+      const target = event.target
+      return target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"]') != null
+    }
+    const down = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || typing(event))
+        return
+      event.preventDefault()
+      if (spaceRef.current)
+        return
+      spaceRef.current = true
+      setSpaceDown(true)
+    }
+    const up = (event: KeyboardEvent) => {
+      if (event.code !== 'Space')
+        return
+      spaceRef.current = false
+      setSpaceDown(false)
+    }
+    const blur = () => {
+      spaceRef.current = false
+      setSpaceDown(false)
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
+    }
   }, [])
 
   useEffect(() => {
@@ -233,7 +272,8 @@ export function MapBoard(props: {
     const node = scrollerRef.current
     if (!node)
       return
-    event.preventDefault()
+    if (event.button !== 0)
+      event.preventDefault()
     fittedRef.current = false
     const origin = { x: event.clientX, y: event.clientY, left: node.scrollLeft, top: node.scrollTop }
     const move = (next: MouseEvent) => {
@@ -243,24 +283,29 @@ export function MapBoard(props: {
       scroller.scrollLeft = origin.left - (next.clientX - origin.x)
       scroller.scrollTop = origin.top - (next.clientY - origin.y)
     }
-    const up = () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
+    const end = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
       panCleanupRef.current = null
       setPanning(false)
     }
     panCleanupRef.current?.()
-    panCleanupRef.current = () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
+    panCleanupRef.current = end
     setPanning(true)
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
   }
 
   function onStageDown(event: StagePointerEvent) {
     const button = event.evt.button
+    const gesturePan = button === 1 || button === 2 || (button === 0 && spaceRef.current)
+    if (gesturePan) {
+      event.evt.stopPropagation()
+      startPan(event.evt)
+      return
+    }
     if (button === 0 && tool === 'fog' && props.dm) {
       // preventDefault на pointerdown гасит mouseup, и мазок не сохраняется.
       event.evt.stopPropagation()
@@ -312,8 +357,8 @@ export function MapBoard(props: {
       window.addEventListener('pointercancel', gesture.drop)
       return
     }
-    const background = button === 1 || (button === 0 && tool === 'move' && event.target.name() === 'board')
-    if (!background)
+    const handPan = button === 0 && tool === 'move' && !fromToken(event.target)
+    if (!handPan)
       return
     event.evt.stopPropagation()
     startPan(event.evt)
@@ -385,19 +430,20 @@ export function MapBoard(props: {
       <div
         ref={scrollerRef}
         onMouseDown={(event) => {
-          if (tool === 'fog')
+          const gesture = event.button === 1 || event.button === 2 || (event.button === 0 && spaceRef.current)
+          if (tool === 'fog' && event.button === 0 && !spaceRef.current)
             return
-          const middle = event.button === 1
           const empty = event.button === 0 && tool === 'move' && event.target === event.currentTarget
-          if (middle || empty)
+          if (gesture || empty)
             startPan(event.nativeEvent)
         }}
         onAuxClick={event => event.preventDefault()}
-        style={{ cursor: boardCursor(panning, tool), flex: 1, minHeight: 0, minWidth: 0, overflow: 'auto', width: '100%' }}
+        onContextMenu={event => event.preventDefault()}
+        style={{ cursor: boardCursor(panning, tool, spaceDown), flex: 1, minHeight: 0, minWidth: 0, overflow: 'auto', width: '100%' }}
       >
         <div style={{ height: height * zoom, width: width * zoom }}>
           <div style={{ height, imageRendering: grid.smoothing === 'nearest' ? 'pixelated' : 'auto', transform: `scale(${zoom})`, transformOrigin: '0 0', width }}>
-            <Stage width={width} height={height} style={{ cursor: boardCursor(panning, tool) }} onClick={onStageClick} onMouseDown={onStageDown} onMouseMove={onStageMove}>
+            <Stage width={width} height={height} style={{ cursor: boardCursor(panning, tool, spaceDown) }} onClick={onStageClick} onMouseDown={onStageDown} onMouseMove={onStageMove}>
               <Layer imageSmoothingEnabled={grid.smoothing !== 'nearest'}>
                 <Rect name="board" width={width} height={height} fill="#1b1724" />
                 {props.scene.imageUrl && image && mapPixels && (
@@ -444,7 +490,7 @@ export function MapBoard(props: {
                     token={token}
                     grid={grid}
                     imageUrl={token.obscured ? null : token.imageUrl}
-                    draggable={tool === 'move'}
+                    draggable={tool === 'move' && !spaceDown}
                     onDragged={() => {
                       draggedRef.current = true
                     }}
@@ -477,6 +523,7 @@ function TokenPiece(props: {
   const frame = portrait ? coverBox(portrait, radius * 2) : null
   return (
     <ShapeGroup
+      name="token"
       x={center.x}
       y={center.y}
       opacity={props.token.hidden ? 0.4 : 1}
@@ -727,10 +774,20 @@ function lineBetween(grid: ReturnType<typeof readBoardGrid>, start: CellPoint, e
   return [from.x, from.y, to.x, to.y]
 }
 
-function boardCursor(panning: boolean, tool: Tool) {
+function fromToken(node: StageNode | null) {
+  let current = node
+  while (current) {
+    if (current.name() === 'token')
+      return true
+    current = current.getParent()
+  }
+  return false
+}
+
+function boardCursor(panning: boolean, tool: Tool, spaceDown: boolean) {
   if (panning)
     return 'grabbing'
-  if (tool === 'move')
+  if (tool === 'move' || spaceDown)
     return 'grab'
   return 'crosshair'
 }
@@ -946,7 +1003,7 @@ function aimsWithPointer(tool: Tool) {
 function measureLabel(tool: Tool, placed: boolean, origin: CellPoint | null, aim: CellPoint | null, cells: number, fogCells: number, reachFeet: number, radiusFeet: number, columns: number, rows: number) {
   const steps = origin && aim ? Math.max(Math.abs(aim.x - origin.x), Math.abs(aim.y - origin.y)) : 0
   const hintByTool: Record<Tool, string> = {
-    move: `Поле ${columns}×${rows} · клетка 5 футов`,
+    move: `Тяни карту. Правая кнопка или пробел сдвигают в любом режиме. Если карта вписана, сначала увеличь. Поле ${columns}×${rows}`,
     fog: fogCells > 0 ? `Прямоугольник: ${fogCells} кл. Отпусти, чтобы применить` : 'Тяни прямоугольник. С пустой клетки ставит туман, с туманной снимает',
     ruler: placed ? `Линейка: ${steps} кл. · ${steps * feetPerCell} футов. Веди мышь. Клик переносит начало` : 'Линейка: клик ставит начало, длина идёт за курсором',
     circle: placed ? `Шар: радиус ${radiusFeet} футов · ${cells} кл. Клик переносит центр` : `Шар: радиус ${radiusFeet} футов. Шаблон за курсором, клик ставит центр`,
