@@ -1,8 +1,11 @@
+export type HexFacing = 'pointy' | 'flat'
+
 export interface BoardGrid {
   columns: number
   rows: number
   cellSize: number
   kind: 'square' | 'hex'
+  hexFacing: HexFacing
   color: string
   opacity: number
   imageScale: number
@@ -21,6 +24,11 @@ const kindByValue: Record<string, BoardGrid['kind'] | undefined> = {
   square: 'square',
 }
 
+const hexFacingByValue: Record<string, HexFacing | undefined> = {
+  flat: 'flat',
+  pointy: 'pointy',
+}
+
 const smoothingByValue: Record<string, BoardGrid['smoothing'] | undefined> = {
   linear: 'linear',
   nearest: 'nearest',
@@ -33,6 +41,7 @@ export function readBoardGrid(grid: {
   rows: number
   cellSize: number
   kind?: string
+  hexFacing?: string
   color?: string
   opacity?: number
   imageScale?: number
@@ -46,6 +55,7 @@ export function readBoardGrid(grid: {
     color: /^#[0-9a-f]{6}$/i.test(color) ? color : '#3a3348',
     columns: grid.columns,
     imageScale: clamp(grid.imageScale ?? 1, 0.1, 8),
+    hexFacing: hexFacingByValue[grid.hexFacing ?? ''] ?? 'pointy',
     kind: kindByValue[grid.kind ?? ''] ?? 'square',
     offsetX: clamp(grid.offsetX ?? 0, -4000, 4000),
     offsetY: clamp(grid.offsetY ?? 0, -4000, 4000),
@@ -73,15 +83,49 @@ export function boardSize(grid: BoardGrid, map?: { height: number, width: number
   return { height: Math.max(1, bottom), width: Math.max(1, right) }
 }
 
+const hexCenterByFacing = {
+  flat(radius: number, col: number, row: number) {
+    return {
+      x: radius + radius * 1.5 * col,
+      y: hexRoot * radius * (row + 0.5 * (col & 1)) + hexRoot * radius / 2,
+    }
+  },
+  pointy(radius: number, col: number, row: number) {
+    return {
+      x: hexRoot * radius * (col + 0.5 * (row & 1)) + hexRoot * radius / 2,
+      y: radius + radius * 1.5 * row,
+    }
+  },
+} satisfies Record<HexFacing, (radius: number, col: number, row: number) => { x: number, y: number }>
+
+const hexAngleByFacing = {
+  flat: 0,
+  pointy: -30,
+} as const satisfies Record<HexFacing, number>
+
+const hexCellByFacing = {
+  flat(localX: number, localY: number, radius: number) {
+    const x = localX - radius
+    const y = localY - hexRoot * radius / 2
+    const axial = axialRound((2 / 3 * x) / radius, (-x / 3 + hexRoot / 3 * y) / radius)
+    const col = axial.q
+    return { x: col, y: axial.r + (col - (col & 1)) / 2 }
+  },
+  pointy(localX: number, localY: number, radius: number) {
+    const x = localX - hexRoot * radius / 2
+    const y = localY - radius
+    const axial = axialRound((hexRoot / 3 * x - y / 3) / radius, (2 / 3 * y) / radius)
+    const row = axial.r
+    return { x: axial.q + (row - (row & 1)) / 2, y: row }
+  },
+} satisfies Record<HexFacing, (localX: number, localY: number, radius: number) => CellPoint>
+
 export function cellCenter(grid: BoardGrid, col: number, row: number) {
   const shift = gridShift(grid)
   if (grid.kind === 'square')
     return { x: shift.x + (col + 0.5) * grid.cellSize, y: shift.y + (row + 0.5) * grid.cellSize }
-  const radius = grid.cellSize / 2
-  return {
-    x: shift.x + hexRoot * radius * (col + 0.5 * (row & 1)) + hexRoot * radius / 2,
-    y: shift.y + radius + radius * 1.5 * row,
-  }
+  const local = hexCenterByFacing[grid.hexFacing](grid.cellSize / 2, col, row)
+  return { x: shift.x + local.x, y: shift.y + local.y }
 }
 
 export function cellAt(grid: BoardGrid, x: number, y: number): CellPoint {
@@ -92,15 +136,10 @@ export function cellAt(grid: BoardGrid, x: number, y: number): CellPoint {
       y: clamp(Math.floor((y - shift.y) / grid.cellSize), 0, grid.rows - 1),
     }
   }
-  const radius = grid.cellSize / 2
-  const localX = x - shift.x - hexRoot * radius / 2
-  const localY = y - shift.y - radius
-  const axial = axialRound((hexRoot / 3 * localX - localY / 3) / radius, (2 / 3 * localY) / radius)
-  const row = axial.r
-  const col = axial.q + (row - (row & 1)) / 2
+  const local = hexCellByFacing[grid.hexFacing](x - shift.x, y - shift.y, grid.cellSize / 2)
   return {
-    x: clamp(col, 0, grid.columns - 1),
-    y: clamp(row, 0, grid.rows - 1),
+    x: clamp(local.x, 0, grid.columns - 1),
+    y: clamp(local.y, 0, grid.rows - 1),
   }
 }
 
@@ -121,22 +160,38 @@ export function cellOutline(grid: BoardGrid, col: number, row: number) {
   }
   const center = cellCenter(grid, col, row)
   const radius = grid.cellSize / 2
+  const turn = hexAngleByFacing[grid.hexFacing]
   const points: number[] = []
   for (let index = 0; index < 6; index += 1) {
-    const angle = Math.PI / 180 * (60 * index - 30)
+    const angle = Math.PI / 180 * (60 * index + turn)
     points.push(center.x + radius * Math.cos(angle), center.y + radius * Math.sin(angle))
   }
   return points
 }
 
+const hexExtentByFacing = {
+  flat(radius: number, columns: number, rows: number) {
+    return {
+      height: hexRoot * radius * (rows + 0.5),
+      width: radius * 2 + radius * 1.5 * (columns - 1),
+    }
+  },
+  pointy(radius: number, columns: number, rows: number) {
+    return {
+      height: radius * 2 + radius * 1.5 * (rows - 1),
+      width: hexRoot * radius * (columns + 0.5),
+    }
+  },
+} satisfies Record<HexFacing, (radius: number, columns: number, rows: number) => { height: number, width: number }>
+
+export function hexFieldSize(facing: HexFacing, columns: number, rows: number, cellSize: number) {
+  return hexExtentByFacing[facing](cellSize / 2, columns, rows)
+}
+
 function gridExtent(grid: BoardGrid) {
   if (grid.kind === 'square')
     return { height: grid.rows * grid.cellSize, width: grid.columns * grid.cellSize }
-  const radius = grid.cellSize / 2
-  return {
-    height: radius * 2 + radius * 1.5 * (grid.rows - 1),
-    width: hexRoot * radius * (grid.columns + 0.5),
-  }
+  return hexFieldSize(grid.hexFacing, grid.columns, grid.rows, grid.cellSize)
 }
 
 function axialRound(q: number, r: number) {

@@ -1,5 +1,5 @@
 import type { Skill } from '@dnd/shared'
-import { skillOfferForClass } from '@dnd/shared'
+import { skillChoiceForOrigin } from '@dnd/shared'
 import { reaction, scoped } from '@virentia/core'
 import { createField, createForm, createWizardForm, readStoreSnapshot, step } from '@virentia/forms'
 
@@ -44,19 +44,20 @@ export const registerForm = createForm({
 const abilityField = () => createField(10, { validate: zodFieldValidator(z.number().int().min(1).max(30)) })
 
 const classIdField = createField('class-fighter')
+const backgroundIdField = createField('background-soldier')
 
 const skillsField = createField<Skill[]>([], {
   validate(value, ctx) {
-    const offer = skillOfferForClass(ctx.read(classIdField.state))
-    if (!offer)
+    const choice = skillChoiceForOrigin(String(ctx.read(classIdField.state)), String(ctx.read(backgroundIdField.state)))
+    if (!choice)
       return 'Неизвестный класс'
     if (new Set(value).size !== value.length)
       return 'Навыки без повторов'
-    const allowed = new Set<string>(offer.skills)
+    const allowed = new Set<string>(choice.skills)
     if (value.some(skill => !allowed.has(skill)))
       return 'Навык не из списка класса'
-    if (value.length !== offer.skillChoices)
-      return `Нужно навыков: ${offer.skillChoices}`
+    if (value.length !== choice.skillChoices)
+      return `Нужно навыков от класса: ${choice.skillChoices}`
     return null
   },
 })
@@ -65,7 +66,7 @@ export const characterWizard = createWizardForm({
   schema: {
     classId: classIdField,
     speciesId: createField('species-human'),
-    backgroundId: createField('background-soldier'),
+    backgroundId: backgroundIdField,
     str: abilityField(),
     dex: abilityField(),
     con: abilityField(),
@@ -136,6 +137,14 @@ export function bootClient() {
       on: classIdField.changed,
       run() {
         void skillsField.fill([])
+      },
+    })
+    reaction({
+      on: backgroundIdField.changed,
+      run() {
+        const choice = skillChoiceForOrigin(classIdField.read(), backgroundIdField.read())
+        const allowed = new Set(choice?.skills ?? [])
+        void skillsField.fill(skillsField.read().filter(skill => allowed.has(skill)))
       },
     })
     reaction({

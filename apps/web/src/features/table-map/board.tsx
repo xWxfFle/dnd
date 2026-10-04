@@ -28,7 +28,14 @@ const sizeByTool: Partial<Record<Tool, { label: string, presets: number[] }>> = 
 }
 
 interface StagePointerEvent {
-  target: { getStage: () => { getPointerPosition: () => { x: number, y: number } | null } | null }
+  evt: MouseEvent
+  target: {
+    name: () => string
+    getStage: () => {
+      getPointerPosition: () => { x: number, y: number } | null
+      setPointersPositions: (event: MouseEvent) => void
+    } | null
+  }
 }
 
 interface CellPoint {
@@ -60,11 +67,16 @@ export function MapBoard(props: {
   const [radiusFeet, setRadiusFeet] = useState(20)
   const [fogDrag, setFogDrag] = useState<{ anchor: CellPoint, aim: CellPoint } | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [panning, setPanning] = useState(false)
   const fogDragRef = useRef<{ anchor: CellPoint, aim: CellPoint } | null>(null)
   const fogUpRef = useRef<(() => void) | null>(null)
   const draggedRef = useRef(false)
   const fittedRef = useRef(true)
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const zoomRef = useRef(zoom)
+  const zoomScrollRef = useRef<{ left: number, top: number } | null>(null)
+  const panCleanupRef = useRef<(() => void) | null>(null)
+  zoomRef.current = zoom
   const focus = props.focusToken
   const gridRef = useRef(grid)
   gridRef.current = grid
@@ -93,8 +105,17 @@ export function MapBoard(props: {
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       fittedRef.current = false
-      const factor = event.deltaY > 0 ? 0.9 : 1.1
-      setZoom(current => clamp(current * factor, 0.15, 4))
+      const current = zoomRef.current
+      const next = clamp(current * (event.deltaY > 0 ? 0.9 : 1.1), 0.15, 4)
+      const rect = node.getBoundingClientRect()
+      const localX = event.clientX - rect.left
+      const localY = event.clientY - rect.top
+      const ratio = next / current
+      zoomScrollRef.current = {
+        left: (node.scrollLeft + localX) * ratio - localX,
+        top: (node.scrollTop + localY) * ratio - localY,
+      }
+      setZoom(next)
     }
     const observer = new ResizeObserver(fit)
     observer.observe(node)
@@ -109,6 +130,20 @@ export function MapBoard(props: {
 
   useEffect(() => {
     const node = scrollerRef.current
+    const next = zoomScrollRef.current
+    if (!node || !next)
+      return
+    zoomScrollRef.current = null
+    node.scrollLeft = next.left
+    node.scrollTop = next.top
+  }, [zoom])
+
+  useEffect(() => () => {
+    panCleanupRef.current?.()
+  }, [])
+
+  useEffect(() => {
+    const node = scrollerRef.current
     if (!focus || !node)
       return
     const center = cellCenter(gridRef.current, focus.x, focus.y)
@@ -120,27 +155,30 @@ export function MapBoard(props: {
   }, [focus, grid.cellSize, grid.columns, grid.kind, grid.rows, zoom])
 
   useEffect(() => () => {
-    if (fogUpRef.current)
-      window.removeEventListener('mouseup', fogUpRef.current)
+    fogUpRef.current?.()
   }, [])
 
-  function resetFog() {
+  function dropFogDrag() {
+    fogUpRef.current?.()
+    fogUpRef.current = null
     fogDragRef.current = null
     setFogDrag(null)
+  }
+
+  function resetFog() {
+    dropFogDrag()
     props.onFogUpdated([])
   }
 
   function coverMap() {
-    fogDragRef.current = null
-    setFogDrag(null)
+    dropFogDrag()
     props.onFogUpdated([{ id: crypto.randomUUID(), points: polygonOf({ x: 0, y: 0, w: columns, h: rows }) }])
   }
 
   function selectTool(next: Tool) {
+    dropFogDrag()
     setTool(next)
     setAnchor(null)
-    fogDragRef.current = null
-    setFogDrag(null)
   }
 
   function cellOf(x: number, y: number) {
@@ -181,31 +219,88 @@ export function MapBoard(props: {
     setFogDrag({ anchor: drag.anchor, aim: point })
   }
 
-  function onStageDown(event: StagePointerEvent) {
-    if (tool !== 'fog' || !props.dm)
+  function startPan(event: MouseEvent) {
+    const node = scrollerRef.current
+    if (!node)
       return
-    const point = readCell(event)
-    if (!point)
-      return
-    const drag = { anchor: point, aim: point }
-    fogDragRef.current = drag
-    setFogDrag(drag)
-    if (fogUpRef.current)
-      window.removeEventListener('mouseup', fogUpRef.current)
-    const finish = () => {
-      window.removeEventListener('mouseup', finish)
-      fogUpRef.current = null
-      const current = fogDragRef.current
-      fogDragRef.current = null
-      setFogDrag(null)
-      if (!current)
+    event.preventDefault()
+    fittedRef.current = false
+    const origin = { x: event.clientX, y: event.clientY, left: node.scrollLeft, top: node.scrollTop }
+    const move = (next: MouseEvent) => {
+      const scroller = scrollerRef.current
+      if (!scroller)
         return
-      const area = cellSpan(current.anchor, current.aim)
-      const next = cellCovered(props.scene.fog, current.anchor) ? cutFog(props.scene.fog, area) : paintFog(props.scene.fog, area)
-      props.onFogUpdated(next)
+      scroller.scrollLeft = origin.left - (next.clientX - origin.x)
+      scroller.scrollTop = origin.top - (next.clientY - origin.y)
     }
-    fogUpRef.current = finish
-    window.addEventListener('mouseup', finish)
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      panCleanupRef.current = null
+      setPanning(false)
+    }
+    panCleanupRef.current?.()
+    panCleanupRef.current = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    setPanning(true)
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  function onStageDown(event: StagePointerEvent) {
+    const button = event.evt.button
+    if (button === 0 && tool === 'fog' && props.dm) {
+      event.evt.preventDefault()
+      event.evt.stopPropagation()
+      const point = readCell(event)
+      if (!point)
+        return
+      const drag = { anchor: point, aim: point }
+      fogDragRef.current = drag
+      setFogDrag(drag)
+      const stage = event.target.getStage()
+      const move = (next: MouseEvent) => {
+        stage?.setPointersPositions(next)
+        const pointer = stage?.getPointerPosition()
+        if (!pointer)
+          return
+        const aim = cellOf(pointer.x, pointer.y)
+        const current = fogDragRef.current
+        if (!current || sameCell(current.aim, aim))
+          return
+        current.aim = aim
+        setFogDrag({ anchor: current.anchor, aim })
+      }
+      const finish = () => {
+        window.removeEventListener('mousemove', move)
+        window.removeEventListener('mouseup', finish)
+        fogUpRef.current = null
+        const current = fogDragRef.current
+        fogDragRef.current = null
+        setFogDrag(null)
+        if (!current)
+          return
+        const area = cellSpan(current.anchor, current.aim)
+        const next = cellCovered(props.scene.fog, current.anchor) ? cutFog(props.scene.fog, area) : paintFog(props.scene.fog, area)
+        props.onFogUpdated(next)
+      }
+      const detach = () => {
+        window.removeEventListener('mousemove', move)
+        window.removeEventListener('mouseup', finish)
+      }
+      fogUpRef.current?.()
+      fogUpRef.current = detach
+      window.addEventListener('mousemove', move)
+      window.addEventListener('mouseup', finish)
+      return
+    }
+    const background = button === 1 || (button === 0 && tool === 'move' && event.target.name() === 'board')
+    if (!background)
+      return
+    event.evt.stopPropagation()
+    startPan(event.evt)
   }
 
   function onStageClick(event: StagePointerEvent) {
@@ -270,12 +365,24 @@ export function MapBoard(props: {
         )}
         <Text size="xs" c="dimmed">{measure}</Text>
       </Stack>
-      <div ref={scrollerRef} style={{ flex: 1, minHeight: 0, minWidth: 0, width: '100%', overflow: 'auto' }}>
+      <div
+        ref={scrollerRef}
+        onMouseDown={(event) => {
+          if (tool === 'fog')
+            return
+          const middle = event.button === 1
+          const empty = event.button === 0 && tool === 'move' && event.target === event.currentTarget
+          if (middle || empty)
+            startPan(event.nativeEvent)
+        }}
+        onAuxClick={event => event.preventDefault()}
+        style={{ cursor: boardCursor(panning, tool), flex: 1, minHeight: 0, minWidth: 0, overflow: 'auto', width: '100%' }}
+      >
         <div style={{ height: height * zoom, width: width * zoom }}>
           <div style={{ height, imageRendering: grid.smoothing === 'nearest' ? 'pixelated' : 'auto', transform: `scale(${zoom})`, transformOrigin: '0 0', width }}>
-            <Stage width={width} height={height} onClick={onStageClick} onMouseDown={onStageDown} onMouseMove={onStageMove}>
+            <Stage width={width} height={height} style={{ cursor: boardCursor(panning, tool) }} onClick={onStageClick} onMouseDown={onStageDown} onMouseMove={onStageMove}>
               <Layer imageSmoothingEnabled={grid.smoothing !== 'nearest'}>
-                <Rect width={width} height={height} fill="#1b1724" />
+                <Rect name="board" width={width} height={height} fill="#1b1724" />
                 {props.scene.imageUrl && image && mapPixels && (
                   <MapImage
                     image={image}
@@ -571,6 +678,14 @@ function lineBetween(grid: ReturnType<typeof readBoardGrid>, start: CellPoint, e
   const from = cellCenter(grid, start.x, start.y)
   const to = cellCenter(grid, end.x, end.y)
   return [from.x, from.y, to.x, to.y]
+}
+
+function boardCursor(panning: boolean, tool: Tool) {
+  if (panning)
+    return 'grabbing'
+  if (tool === 'move')
+    return 'grab'
+  return 'crosshair'
 }
 
 function fitZoom(node: HTMLDivElement | null, width: number, height: number) {

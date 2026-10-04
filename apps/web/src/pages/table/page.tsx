@@ -4,6 +4,7 @@ import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
 import { MapBoard } from '@/features/table-map/board'
+import { hexFieldSize } from '@/features/table-map/grid'
 import { ClassKit } from '@/pages/table/class-kit'
 import { CombatStrip, HpAdjust, HpBar } from '@/pages/table/combat-strip'
 import { DiceLog, DiceTray } from '@/pages/table/dice-tray'
@@ -37,6 +38,12 @@ import {
   gridOpacity,
   gridOpacityChanged,
   gridPresetChosen,
+  heroDeleteId,
+  heroDeletePressed,
+  heroKindChosen,
+  heroRenamed,
+  hexFacing,
+  hexFacingChanged,
   imageScale,
   imageScaleChanged,
   inspirationToggled,
@@ -87,6 +94,8 @@ const panelGlass = {
   backgroundColor: 'light-dark(color-mix(in srgb, white 78%, transparent), color-mix(in srgb, var(--mantine-color-dark-7) 76%, transparent))',
 } as const
 
+const kindMark = { custom: ' · моб', hero: '' } as const satisfies Record<CharacterDto['kind'], string>
+
 export function TablePage() {
   const state = useUnit({
     snapshot: liveSnapshot,
@@ -126,6 +135,8 @@ export function TablePage() {
     setFocusToken({ x: token.x, y: token.y, tick: Date.now() })
   }
   const openHero = (characterId: string) => {
+    if (!state.sheets.some(item => item.id === characterId))
+      return
     setTableOpen(false)
     setTokenId(null)
     setSheetId(currentId => currentId === characterId ? null : characterId)
@@ -137,8 +148,7 @@ export function TablePage() {
     focusOn(id)
     setTableOpen(false)
     if (token.characterId) {
-      setTokenId(null)
-      setSheetId(currentId => currentId === token.characterId ? null : token.characterId)
+      openHero(token.characterId)
       return
     }
     setSheetId(null)
@@ -181,7 +191,7 @@ export function TablePage() {
         </Group>
       </Group>
       <Group align="stretch" wrap="nowrap" gap="sm" style={{ flex: 1, minHeight: 0 }}>
-        <Stack gap="sm" style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+        <Stack gap="sm" style={{ flex: 1, height: '100%', minWidth: 0, minHeight: 0, position: 'relative' }}>
           <Paper withBorder p={0} style={{ ...panelGlass, flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
             <div style={{ position: 'absolute', inset: 8 }}>
               {current
@@ -200,7 +210,7 @@ export function TablePage() {
             </div>
           </Paper>
           {(openSheet ?? openToken) && (
-            <Paper withBorder p="sm" style={{ ...panelGlass, flex: 'none', height: '38%', minHeight: 220, overflow: 'auto' }}>
+            <Paper withBorder p="sm" style={{ ...panelGlass, position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 2, maxHeight: '42%', overflow: 'auto' }}>
               {openToken
                 ? (
                     <MonsterEdit
@@ -214,7 +224,7 @@ export function TablePage() {
                       <Select
                         size="xs"
                         aria-label="Герой"
-                        data={state.sheets.map(item => ({ value: item.id, label: item.name }))}
+                        data={state.sheets.map(item => ({ value: item.id, label: `${item.name}${kindMark[item.kind]}` }))}
                         value={openSheet.id}
                         onChange={setSheetId}
                         allowDeselect={false}
@@ -357,17 +367,24 @@ function ActorsPanel(props: { onOpenHero: (characterId: string) => void, onOpenT
   const [placeOpen, setPlaceOpen] = useState(false)
   const sceneReady = Boolean(state.scene)
   const mobs = state.sceneTokens.filter(token => token.characterId == null)
+  const heroes = state.roster.filter(character => character.kind === 'hero')
+  const customMobs = state.roster.filter(character => character.kind === 'custom')
   return (
     <Stack gap="sm">
       <Group justify="flex-end" gap="xs">
         <Button size="xs" variant="light" onClick={() => void state.characterOpened()}>Новый герой</Button>
         <Button size="xs" variant="light" disabled={!sceneReady} onClick={() => setPlaceOpen(open => !open)}>Новый монстр</Button>
       </Group>
-      {state.roster.map(character => (
-        <Button key={character.id} size="xs" variant="subtle" fullWidth onClick={() => props.onOpenHero(character.id)}>
-          {`${character.name} · ${character.hpCurrent}/${character.hpMax}`}
-        </Button>
+      <Text size="xs" fw={700}>Герои</Text>
+      {heroes.map(character => (
+        <CharacterLink key={character.id} character={character} onOpen={props.onOpenHero} />
       ))}
+      <Text size="xs" fw={700}>Кастомные мобы</Text>
+      {customMobs.length === 0
+        ? <Text size="xs" c="dimmed">Нет. На листе своего героя переключи «Кастомный моб».</Text>
+        : customMobs.map(character => (
+            <CharacterLink key={character.id} character={character} onOpen={props.onOpenHero} />
+          ))}
       <Divider />
       {sceneReady && (
         <Collapse expanded={placeOpen}>
@@ -405,6 +422,7 @@ function TableSetup() {
     rows,
     cellSize,
     gridKind,
+    hexFacing,
     gridColor,
     gridOpacity,
     imageScale,
@@ -422,6 +440,7 @@ function TableSetup() {
     rowsChanged,
     cellSizeChanged,
     gridKindChanged,
+    hexFacingChanged,
     gridColorChanged,
     gridOpacityChanged,
     imageScaleChanged,
@@ -435,7 +454,7 @@ function TableSetup() {
     if (state.mapWidth <= 0)
       return
     const widthByKind = {
-      hex: Math.sqrt(3) * (state.cellSize / 2) * (state.columns + 0.5),
+      hex: hexFieldSize(state.hexFacing, state.columns, state.rows, state.cellSize).width,
       square: state.columns * state.cellSize,
     } as const satisfies Record<'hex' | 'square', number>
     state.imageScaleChanged(widthByKind[state.gridKind] / state.mapWidth)
@@ -500,6 +519,15 @@ function TableSetup() {
             onChange={state.gridKindChanged}
             data={[{ label: 'Квадрат', value: 'square' }, { label: 'Гекс', value: 'hex' }]}
           />
+          {state.gridKind === 'hex' && (
+            <SegmentedControl
+              size="xs"
+              fullWidth
+              value={state.hexFacing}
+              onChange={state.hexFacingChanged}
+              data={[{ label: 'Вершиной', value: 'pointy' }, { label: 'На 90°', value: 'flat' }]}
+            />
+          )}
           <ColorInput size="xs" label="Цвет сетки" format="hex" value={state.gridColor} onChange={state.gridColorChanged} withEyeDropper={false} />
           <Text size="xs">Прозрачность сетки</Text>
           <Slider
@@ -539,7 +567,7 @@ function TableSetup() {
 }
 
 function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady: boolean }) {
-  const { toggle, rest, catalog, rollAttack, tokens, master, viewer } = useUnit({
+  const { toggle, rest, catalog, rollAttack, tokens, master, viewer, pendingHeroDelete, deleteHero, renameHero, chooseKind } = useUnit({
     toggle: characterPlacementToggled,
     rest: restRequested,
     catalog: catalogNames,
@@ -547,9 +575,15 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
     tokens: sceneTokens,
     master: dm,
     viewer: viewerId,
+    pendingHeroDelete: heroDeleteId,
+    deleteHero: heroDeletePressed,
+    renameHero: heroRenamed,
+    chooseKind: heroKindChosen,
   })
   const sheet = props.sheet
   const editable = master || sheet.userId === viewer
+  const ownSheet = master && sheet.userId === viewer
+  const deleteLabelByKind = { custom: 'Удалить моба', hero: 'Удалить героя' } as const satisfies Record<CharacterDto['kind'], string>
   const tokenId = tokens.find(token => token.characterId === sheet.id)?.id ?? null
   return (
     <Tabs defaultValue="overview" w="100%">
@@ -564,7 +598,27 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
           <Group gap="sm" wrap="nowrap" align="flex-start">
             <Avatar src={sheet.avatarUrl ?? undefined} alt="" size="lg" radius="xl" />
             <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-              <Text fw={700}>{sheet.name}</Text>
+              {editable
+                ? (
+                    <TextInput
+                      key={`${sheet.id}:${sheet.name}`}
+                      size="xs"
+                      aria-label="Имя"
+                      defaultValue={sheet.name}
+                      onBlur={event => renameHero({ characterId: sheet.id, name: event.currentTarget.value })}
+                    />
+                  )
+                : <Text fw={700}>{sheet.name}</Text>}
+              {ownSheet && (
+                <SegmentedControl
+                  size="xs"
+                  fullWidth
+                  value={sheet.kind}
+                  onChange={kind => chooseKind({ characterId: sheet.id, kind })}
+                  data={[{ label: 'Герой', value: 'hero' }, { label: 'Кастомный моб', value: 'custom' }]}
+                />
+              )}
+              {ownSheet && sheet.kind === 'custom' && <Text size="xs" c="dimmed">Игроки не видят его в списке.</Text>}
               <Text size="sm">{sheetTitle(sheet, catalog)}</Text>
               <Text size="sm">{`КД ${sheet.ac} · ${sheet.speed} фт`}</Text>
             </Stack>
@@ -579,6 +633,9 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
                 {props.onMap ? 'Убрать с карты' : 'На карту'}
               </Button>
               <PortraitUpload characterId={sheet.id} />
+              <Button size="xs" variant={pendingHeroDelete === sheet.id ? 'filled' : 'default'} onClick={() => deleteHero(sheet.id)}>
+                {pendingHeroDelete === sheet.id ? 'Точно удалить' : deleteLabelByKind[sheet.kind]}
+              </Button>
             </Group>
           )}
         </Stack>
@@ -797,6 +854,15 @@ function MonsterStat() {
       <NumberInput size="xs" label="Сколько" min={1} max={12} allowDecimal={false} value={copies} onChange={changeCopies} />
       <Button size="xs" variant="light" onClick={() => void place()}>На карту</Button>
     </Stack>
+  )
+}
+
+function CharacterLink(props: { character: CharacterDto, onOpen: (characterId: string) => void }) {
+  const character = props.character
+  return (
+    <Button size="xs" variant="subtle" fullWidth onClick={() => props.onOpen(character.id)}>
+      {`${character.name} · ${character.hpCurrent}/${character.hpMax}`}
+    </Button>
   )
 }
 

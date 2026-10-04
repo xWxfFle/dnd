@@ -43,6 +43,13 @@
       "when": 1790573600000,
       "tag": "0005_token_inventory",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790580000000,
+      "tag": "0006_character_kind",
+      "breakpoints": true
     }
   ]
 }

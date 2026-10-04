@@ -19,7 +19,7 @@ const skillOfferByDraft = {
   monk: offered(['acrobatics', 'athletics', 'history', 'insight', 'religion', 'stealth']),
   paladin: offered(['athletics', 'insight', 'intimidation', 'medicine', 'persuasion', 'religion']),
   ranger: offered(['animal-handling', 'athletics', 'insight', 'investigation', 'nature', 'perception', 'stealth', 'survival']),
-  rogue: offered(['acrobatics', 'athletics', 'deception', 'insight', 'intimidation', 'investigation', 'perception', 'persuasion', 'sleight-of-hand', 'stealth']),
+  rogue: offered(['acrobatics', 'athletics', 'deception', 'insight', 'intimidation', 'investigation', 'perception', 'performance', 'persuasion', 'sleight-of-hand', 'stealth']),
   sorcerer: offered(['arcana', 'deception', 'insight', 'intimidation', 'persuasion', 'religion']),
   warlock: offered(['arcana', 'deception', 'history', 'intimidation', 'investigation', 'nature', 'religion']),
   wizard: offered(['arcana', 'history', 'insight', 'investigation', 'medicine', 'nature', 'religion']),
@@ -297,16 +297,18 @@ const species: SrdSeed[] = [
   body: { speed, trait },
 }))
 
-const backgrounds: SrdSeed[] = [
-  ['acolyte', 'Послушник', 'magic-initiate-cleric', 'wis', 'int'],
-  ['criminal', 'Преступник', 'alert', 'dex', 'con'],
-  ['sage', 'Мудрец', 'magic-initiate-wizard', 'con', 'int'],
-  ['soldier', 'Солдат', 'savage-attacker', 'str', 'con'],
-].map(([id, name, feat, a, b]) => ({
-  id: `background-${id}`,
+const backgroundDrafts = [
+  { id: 'acolyte', name: 'Послушник', feat: 'magic-initiate-cleric', abilities: ['wis', 'int'], skills: ['insight', 'religion'] },
+  { id: 'criminal', name: 'Преступник', feat: 'alert', abilities: ['dex', 'con'], skills: ['sleight-of-hand', 'stealth'] },
+  { id: 'sage', name: 'Мудрец', feat: 'magic-initiate-wizard', abilities: ['con', 'int'], skills: ['arcana', 'history'] },
+  { id: 'soldier', name: 'Солдат', feat: 'savage-attacker', abilities: ['str', 'con'], skills: ['athletics', 'intimidation'] },
+] as const satisfies readonly { abilities: readonly string[], feat: string, id: string, name: string, skills: readonly Skill[] }[]
+
+const backgrounds: SrdSeed[] = backgroundDrafts.map(draft => ({
+  id: `background-${draft.id}`,
   kind: 'background' as const,
-  name: String(name),
-  body: { originFeatId: feat, abilities: [a, b] },
+  name: draft.name,
+  body: { originFeatId: draft.feat, abilities: [...draft.abilities], skills: [...draft.skills] },
 }))
 
 const feats: SrdSeed[] = [
@@ -477,6 +479,43 @@ export const srdCatalog: SrdSeed[] = [
   ...monsters,
   ...items,
 ]
+
+function isSkill(value: unknown): value is Skill {
+  return typeof value === 'string' && (skills as readonly string[]).includes(value)
+}
+
+export function backgroundSkillGrant(backgroundId: string): Skill[] {
+  const entry = srdCatalog.find(item => item.id === backgroundId && item.kind === 'background')
+  const list = entry?.body.skills
+  if (!Array.isArray(list))
+    return []
+  return list.filter(isSkill)
+}
+
+export function skillChoiceForOrigin(classId: string, backgroundId: string) {
+  const offer = skillOfferForClass(classId)
+  if (!offer)
+    return null
+  const granted = backgroundSkillGrant(backgroundId)
+  const grantedSet = new Set<string>(granted)
+  return {
+    granted,
+    skillChoices: offer.skillChoices,
+    skills: offer.skills.filter(skill => !grantedSet.has(skill)),
+  }
+}
+
+export function acceptSkillChoice(classId: string, backgroundId: string, chosen: readonly Skill[]) {
+  const choice = skillChoiceForOrigin(classId, backgroundId)
+  if (!choice)
+    return null
+  if (new Set(chosen).size !== chosen.length || chosen.length !== choice.skillChoices)
+    return null
+  const allowed = new Set<string>(choice.skills)
+  if (chosen.some(skill => !allowed.has(skill)))
+    return null
+  return [...choice.granted, ...chosen]
+}
 
 export function gearByItemId(itemId: string) {
   const entry = srdCatalog.find(item => item.id === itemId)

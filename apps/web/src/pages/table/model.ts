@@ -36,7 +36,13 @@ export const viewerId = computed(() => readUserId())
 
 export const monsters = computed(() => (srdQuery.data.value ?? []).filter(entry => entry.kind === 'monster'))
 
-export const roster = computed(() => liveSnapshot.value?.characters ?? [])
+export const roster = computed(() => {
+  const snapshot = liveSnapshot.value
+  const characters = snapshot?.characters ?? []
+  if (snapshot?.campaign.role === 'dm')
+    return characters
+  return characters.filter(character => character.kind !== 'custom')
+})
 
 export const sheets = computed(() => {
   const userId = readUserId()
@@ -62,6 +68,7 @@ export const sceneTokens = computed(() => {
 
 export const mapName = store('')
 export const confirmDelete = store(false)
+export const heroDeleteId = store<string | null>(null)
 export const monsterId = store('monster-goblin-warrior')
 export const monsterCopies = store(1)
 export const selectedMonster = computed(() => monsters.value.find(entry => entry.id === monsterId.value))
@@ -70,6 +77,7 @@ export const columns = store(20)
 export const rows = store(14)
 export const cellSize = store(48)
 export const gridKind = store<'square' | 'hex'>('square')
+export const hexFacing = store<'pointy' | 'flat'>('pointy')
 export const gridColor = store('#3a3348')
 export const gridOpacity = store(1)
 export const imageScale = store(1)
@@ -100,6 +108,7 @@ export const columnsChanged = event<string | number>()
 export const rowsChanged = event<string | number>()
 export const cellSizeChanged = event<string | number>()
 export const gridKindChanged = event<string>()
+export const hexFacingChanged = event<string>()
 export const gridColorChanged = event<string>()
 export const gridOpacityChanged = event<number>()
 export const imageScaleChanged = event<number>()
@@ -114,6 +123,9 @@ export const monsterSelected = event<string>()
 export const monsterCopiesChanged = event<string | number>()
 export const monsterPlaceRequested = event<void>()
 export const characterPlacementToggled = event<string>()
+export const heroDeletePressed = event<string>()
+export const heroRenamed = event<{ characterId: string, name: string }>()
+export const heroKindChosen = event<{ characterId: string, kind: string }>()
 export const restRequested = event<{ characterId: string, kind: 'short' | 'long' }>()
 export const inspirationToggled = event<string>()
 export const exhaustionAdjusted = event<{ characterId: string, delta: number }>()
@@ -203,6 +215,11 @@ const rollByKind = {
   }),
 } as const satisfies Record<AttackRollKind, (attack: AttackDef, exhaustion?: number) => { label: string, formula: string, mode: 'normal' | 'crit', exhaustion?: number }>
 
+const heroKindByValue: Record<string, 'hero' | 'custom' | undefined> = {
+  custom: 'custom',
+  hero: 'hero',
+}
+
 export function bootTableModel() {
   scoped(appScope, () => {
     reaction({
@@ -220,6 +237,7 @@ export function bootTableModel() {
           rows.value = current.grid.rows
           cellSize.value = current.grid.cellSize
           gridKind.value = kindOf(current.grid.kind)
+          hexFacing.value = hexFacingOf(current.grid.hexFacing)
           gridColor.value = hexColor(current.grid.color)
           gridOpacity.value = clampNumber(current.grid.opacity ?? 1, 0, 1)
           imageScale.value = clampNumber(current.grid.imageScale ?? 1, 0.1, 8)
@@ -284,6 +302,12 @@ export function bootTableModel() {
       on: gridKindChanged,
       run(value) {
         gridKind.value = kindOf(value)
+      },
+    })
+    reaction({
+      on: hexFacingChanged,
+      run(value) {
+        hexFacing.value = hexFacingOf(value)
       },
     })
     reaction({
@@ -402,6 +426,7 @@ export function bootTableModel() {
         rows.value = grid.rows
         cellSize.value = grid.cellSize
         gridKind.value = grid.kind
+        hexFacing.value = grid.hexFacing
         gridColor.value = grid.color
         gridOpacity.value = grid.opacity
         imageScale.value = grid.imageScale
@@ -462,6 +487,40 @@ export function bootTableModel() {
           path: `/api/campaigns/${snapshot.campaign.id}/scenes/${current.id}/characters/${characterId}`,
           method: placed ? 'DELETE' : 'POST',
         })
+      },
+    })
+    reaction({
+      on: heroDeletePressed,
+      run(characterId) {
+        const base = campaignBase()
+        if (!base)
+          return
+        if (heroDeleteId.value !== characterId) {
+          heroDeleteId.value = characterId
+          return
+        }
+        heroDeleteId.value = null
+        void commandFx({ path: `${base}/characters/${characterId}`, method: 'DELETE' })
+      },
+    })
+    reaction({
+      on: heroRenamed,
+      run({ characterId, name }) {
+        const next = name.trim().slice(0, 80)
+        const sheet = characterById(characterId)
+        if (!next || !sheet || next === sheet.name)
+          return
+        patchCharacter(characterId, { name: next })
+      },
+    })
+    reaction({
+      on: heroKindChosen,
+      run({ characterId, kind }) {
+        const next = heroKindByValue[kind]
+        const sheet = characterById(characterId)
+        if (!next || !sheet || !dm.value || sheet.userId !== viewerId.value || next === sheet.kind)
+          return
+        patchCharacter(characterId, { kind: next })
       },
     })
     reaction({
@@ -911,6 +970,15 @@ function kindOf(value: string | undefined) {
   return kindByValue[value ?? ''] ?? 'square'
 }
 
+const hexFacingByValue: Record<string, 'pointy' | 'flat' | undefined> = {
+  flat: 'flat',
+  pointy: 'pointy',
+}
+
+function hexFacingOf(value: string | undefined) {
+  return hexFacingByValue[value ?? ''] ?? 'pointy'
+}
+
 const smoothingByValue: Record<string, 'linear' | 'nearest' | undefined> = {
   linear: 'linear',
   nearest: 'nearest',
@@ -936,6 +1004,7 @@ function gridBody() {
     color: hexColor(gridColor.value),
     columns: clampInt(columns.value, 1, 200),
     imageScale: clampNumber(imageScale.value, 0.1, 8),
+    hexFacing: hexFacing.value,
     kind: gridKind.value,
     offsetX: clampInt(offsetX.value, -4000, 4000),
     offsetY: clampInt(offsetY.value, -4000, 4000),
@@ -950,6 +1019,7 @@ function gridKeyOf(sceneId: string, grid: {
   color?: string
   columns: number
   imageScale?: number
+  hexFacing?: string
   kind?: string
   offsetX?: number
   offsetY?: number
@@ -957,7 +1027,7 @@ function gridKeyOf(sceneId: string, grid: {
   rows: number
   smoothing?: string
 }) {
-  return `${sceneId}:${grid.columns}:${grid.rows}:${grid.cellSize}:${kindOf(grid.kind)}:${hexColor(grid.color)}:${clampNumber(grid.opacity ?? 1, 0, 1)}:${clampNumber(grid.imageScale ?? 1, 0.1, 8)}:${clampInt(grid.offsetX ?? 0, -4000, 4000)}:${clampInt(grid.offsetY ?? 0, -4000, 4000)}:${smoothingOf(grid.smoothing)}`
+  return `${sceneId}:${grid.columns}:${grid.rows}:${grid.cellSize}:${kindOf(grid.kind)}:${hexFacingOf(grid.hexFacing)}:${hexColor(grid.color)}:${clampNumber(grid.opacity ?? 1, 0, 1)}:${clampNumber(grid.imageScale ?? 1, 0.1, 8)}:${clampInt(grid.offsetX ?? 0, -4000, 4000)}:${clampInt(grid.offsetY ?? 0, -4000, 4000)}:${smoothingOf(grid.smoothing)}`
 }
 
 function readCount(value: string | number, fallback: number) {

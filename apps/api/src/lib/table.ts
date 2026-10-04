@@ -3,6 +3,7 @@ import { statSync } from 'node:fs'
 import {
   abilities,
   abilityModifier,
+  acceptSkillChoice,
   armorClass,
   concealEnemies,
   equipmentSheet,
@@ -19,7 +20,6 @@ import {
   rollD20,
   rollDamage,
   rollFormula,
-  skillOfferForClass,
   skills,
   srdCatalog,
 } from '@dnd/shared'
@@ -83,6 +83,11 @@ export function gearFields(row: Pick<CharacterRow, 'abilities' | 'level' | 'atta
   return { inventory: gear.inventory, ac: gear.ac, attacks: gear.attacks }
 }
 
+const characterKindByValue: Record<string, 'hero' | 'custom' | undefined> = {
+  custom: 'custom',
+  hero: 'hero',
+}
+
 export function toCharacterDto(row: CharacterRow): CharacterDto {
   const gear = gearOfRow(row)
   return {
@@ -117,6 +122,7 @@ export function toCharacterDto(row: CharacterRow): CharacterDto {
     castingAbility: (row.castingAbility as CharacterDto['castingAbility']) ?? null,
     notes: row.notes,
     avatarUrl: row.avatarPath ? `/api/characters/${row.id}/avatar` : null,
+    kind: characterKindByValue[row.kind] ?? 'hero',
   }
 }
 
@@ -231,10 +237,8 @@ export async function createCharacter(input: {
   const background = srd(input.backgroundId)
   if (!classEntry || classEntry.kind !== 'class' || !species || !background)
     return null
-  const offer = skillOfferForClass(input.classId)
-  const picked = input.skillProficiencies
-  const allowed = new Set(offer?.skills ?? [])
-  if (!offer || picked.length !== offer.skillChoices || picked.some(skill => !allowed.has(skill)))
+  const picked = acceptSkillChoice(input.classId, input.backgroundId, input.skillProficiencies)
+  if (!picked)
     return null
   const saveProficiencies = asAbilityList(classEntry.body.saves)
   if (saveProficiencies.length === 0)
@@ -421,6 +425,7 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
   const tokenRows = await listTokens(sceneRows.map(scene => scene.id), role)
   const active = sceneRows.find(scene => scene.active) ?? sceneRows[0] ?? null
   const sheetRows = await db.select().from(characters).where(eq(characters.campaignId, campaignId))
+  const visibleSheets = role === 'dm' ? sheetRows : sheetRows.filter(row => row.kind !== 'custom')
   const concealment = role === 'dm'
     ? { hidden: new Set<string>(), obscured: new Set<string>() }
     : concealEnemies({
@@ -463,7 +468,7 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
     tokens,
     combat: concealCombat(combat, concealment),
     rolls: await listRolls(campaignId),
-    characters: sheetRows.map(toCharacterDto),
+    characters: visibleSheets.map(toCharacterDto),
   }
 }
 

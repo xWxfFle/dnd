@@ -1,5 +1,5 @@
 import type { Skill } from '@dnd/shared'
-import { abilities, abilityLabel, skillLabel, skillOfferForClass, skills } from '@dnd/shared'
+import { abilities, abilityLabel, skillChoiceForOrigin, skillLabel, skills } from '@dnd/shared'
 import { Button, Checkbox, Group, NumberInput, Select, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useField, useWizard } from '@virentia/forms-react'
 import { useUnit } from '@virentia/react'
@@ -73,6 +73,7 @@ export function CharacterPage() {
       {current === 'skills' && (
         <SkillChoices
           classId={classId.value}
+          backgroundId={backgroundId.value}
           picked={skillPick.value}
           error={skillPick.errors}
           onChange={value => void skillPick.fill(value)}
@@ -93,30 +94,39 @@ export function CharacterPage() {
 
 function SkillChoices(props: {
   classId: string
+  backgroundId: string
   picked: Skill[]
   error: string | null
   onChange: (skills: Skill[]) => void
 }) {
-  const offer = skillOfferForClass(props.classId)
-  const choices = offer?.skillChoices ?? 0
+  const choice = skillChoiceForOrigin(props.classId, props.backgroundId)
+  const granted = new Set<string>(choice?.granted ?? [])
+  const offered = new Set<string>(choice?.skills ?? [])
+  const choices = choice?.skillChoices ?? 0
+  const toggle = (skill: Skill) => {
+    if (!offered.has(skill))
+      return
+    if (props.picked.includes(skill)) {
+      props.onChange(props.picked.filter(item => item !== skill))
+      return
+    }
+    if (props.picked.length >= choices)
+      return
+    props.onChange([...props.picked, skill])
+  }
   return (
-    <Checkbox.Group
-      label="Навыки"
-      description={`Выбрано ${props.picked.length} из ${choices}`}
-      value={props.picked}
-      error={props.error ?? undefined}
-      maxSelectedValues={choices}
-      onChange={value => props.onChange(value.filter(isSkill))}
-    >
-      <Stack gap="xs" mt="xs">
-        {(offer?.skills ?? []).map(skill => (
-          <Checkbox key={skill} value={skill} label={skillLabel[skill]} />
-        ))}
-      </Stack>
-    </Checkbox.Group>
+    <Stack gap="xs">
+      <Text size="sm">{`Предыстория уже даёт владение. От класса ${props.picked.length} из ${choices}.`}</Text>
+      {props.error && <Text size="sm" c="red">{props.error}</Text>}
+      {skills.map(skill => (
+        <Checkbox
+          key={skill}
+          label={granted.has(skill) ? `${skillLabel[skill]} · предыстория` : skillLabel[skill]}
+          checked={granted.has(skill) || props.picked.includes(skill)}
+          disabled={!offered.has(skill)}
+          onChange={() => toggle(skill)}
+        />
+      ))}
+    </Stack>
   )
-}
-
-function isSkill(value: string): value is Skill {
-  return (skills as readonly string[]).includes(value)
 }

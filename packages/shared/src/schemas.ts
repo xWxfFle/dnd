@@ -139,6 +139,7 @@ export const characterSchema = z.object({
   castingAbility: abilitySchema.nullable(),
   notes: z.string(),
   avatarUrl: z.string().nullable(),
+  kind: z.enum(['hero', 'custom']),
 })
 
 export const createCharacterSchema = z.object({
@@ -193,6 +194,7 @@ export const gridSchema = z.object({
   rows: z.number().int().min(1).max(200),
   cellSize: z.number().min(8).max(256),
   kind: z.enum(['square', 'hex']).optional(),
+  hexFacing: z.enum(['pointy', 'flat']).optional(),
   color: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
   opacity: z.number().min(0).max(1).optional(),
   imageScale: z.number().min(0.1).max(8).optional(),

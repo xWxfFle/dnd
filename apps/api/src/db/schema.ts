@@ -76,6 +76,7 @@ export const characters = pgTable('characters', {
   castingAbility: text('casting_ability'),
   notes: text('notes').notNull().default(''),
   avatarPath: text('avatar_path'),
+  kind: text('kind').notNull().default('hero'),
 })
 
 export const scenes = pgTable('scenes', {
