@@ -1,17 +1,21 @@
 import { Button, Group, Paper, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useField } from '@virentia/forms-react'
 import { useUnit } from '@virentia/react'
-import { campaignsQuery, createCampaignMutation } from '@/shared/api'
+import { campaignsQuery, createCampaignMutation, joinMutation } from '@/shared/api'
 import { AccountMenu } from '@/shared/ui/account-menu'
-import { campaignCreateRequested, campaignName, campaignOpened } from './model'
+import { campaignCreateRequested, campaignName, campaignOpened, joinCode, joinRequested } from './model'
 
 export function HomePage() {
   const name = useField(campaignName)
-  const { campaigns, pending, createRequested, openCampaign } = useUnit({
+  const code = useField(joinCode)
+  const { campaigns, pending, createRequested, openCampaign, join, joinPending, joinFailed } = useUnit({
     campaigns: campaignsQuery.data,
     pending: createCampaignMutation.pending,
     createRequested: campaignCreateRequested,
     openCampaign: campaignOpened,
+    join: joinRequested,
+    joinPending: joinMutation.pending,
+    joinFailed: joinMutation.error,
   })
   const localhost = typeof window !== 'undefined' && window.location.hostname === 'localhost'
   return (
@@ -29,6 +33,20 @@ export function HomePage() {
           </Text>
         </Paper>
       )}
+      <Group align="end">
+        <TextInput
+          label="Код приглашения"
+          placeholder="код или ссылка"
+          value={code.value}
+          onChange={event => void code.fill(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter')
+              void join()
+          }}
+        />
+        <Button loading={joinPending} disabled={!code.value.trim()} onClick={() => void join()}>Войти по коду</Button>
+      </Group>
+      {joinFailed != null ? <Text c="red">Приглашение не найдено</Text> : null}
       <Group align="end">
         <TextInput label="Название" value={name.value} onChange={event => void name.fill(event.currentTarget.value)} />
         <Button loading={pending} onClick={() => void createRequested()}>Создать</Button>

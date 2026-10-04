@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { Elysia, status } from 'elysia'
 import { db } from '../../db'
 import { characters, scenes, tokens } from '../../db/schema'
+import { imageResponse } from '../../lib/uploads'
 import { publicCharacterParams, publicSceneParams, publicTokenParams } from '../params'
 
 export const filesModule = new Elysia({ name: 'files' })
@@ -12,7 +13,7 @@ export const filesModule = new Elysia({ name: 'files' })
     const file = Bun.file(scene.imagePath)
     if (!(await file.exists()))
       return status(404, { error: 'Файл карты не найден' })
-    return file
+    return imageResponse(scene.imagePath)
   }, {
     params: publicSceneParams,
   })
@@ -23,7 +24,7 @@ export const filesModule = new Elysia({ name: 'files' })
     const file = Bun.file(token.imagePath)
     if (!(await file.exists()))
       return status(404, { error: 'Файл картинки не найден' })
-    return file
+    return imageResponse(token.imagePath)
   }, {
     params: publicTokenParams,
   })
@@ -34,7 +35,7 @@ export const filesModule = new Elysia({ name: 'files' })
     const file = Bun.file(character.avatarPath)
     if (!(await file.exists()))
       return status(404, { error: 'Файл портрета не найден' })
-    return file
+    return imageResponse(character.avatarPath)
   }, {
     params: publicCharacterParams,
   })

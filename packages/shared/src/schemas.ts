@@ -192,6 +192,13 @@ export const gridSchema = z.object({
   columns: z.number().int().min(1).max(200),
   rows: z.number().int().min(1).max(200),
   cellSize: z.number().min(8).max(256),
+  kind: z.enum(['square', 'hex']).optional(),
+  color: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+  opacity: z.number().min(0).max(1).optional(),
+  imageScale: z.number().min(0.1).max(8).optional(),
+  offsetX: z.number().min(-4000).max(4000).optional(),
+  offsetY: z.number().min(-4000).max(4000).optional(),
+  smoothing: z.enum(['linear', 'nearest']).optional(),
 })
 
 export const fogPolygonSchema = z.object({

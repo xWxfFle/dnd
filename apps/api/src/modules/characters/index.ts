@@ -17,10 +17,9 @@ async function loadCharacter(campaignId: string, characterId: string, userId: st
 }
 
 export const charactersModule = campaignRoutes('campaign-characters')
-  .get('/:id/characters', async ({ userId, params, role }) => {
+  .get('/:id/characters', async ({ params }) => {
     const rows = await db.select().from(characters).where(eq(characters.campaignId, params.id))
-    const visible = role === 'dm' ? rows : rows.filter(row => row.userId === userId)
-    return visible.map(toCharacterDto)
+    return rows.map(toCharacterDto)
   }, {
     member: true,
     params: idParams,

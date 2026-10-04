@@ -1,9 +1,10 @@
 import type { SceneDto, TokenDto } from '@dnd/shared'
 import { isBloodied } from '@dnd/shared'
 import { ActionIcon, Button, Group, Stack, Text } from '@mantine/core'
-import { IconMinus, IconPlus } from '@tabler/icons-react'
+import { IconArrowsMaximize, IconMinus, IconPlus } from '@tabler/icons-react'
 import { useEffect, useRef, useState } from 'react'
 import { Circle, Layer, Line, Image as MapImage, Rect, Group as ShapeGroup, Text as ShapeText, Stage } from 'react-konva'
+import { boardSize, cellAt, cellCenter, cellOutline, cellSpaceToPixels, gridShift, mapOrigin, readBoardGrid } from './grid'
 
 type Tool = 'move' | 'ruler' | 'circle' | 'cone' | 'line' | 'fog'
 
@@ -41,62 +42,124 @@ export function MapBoard(props: {
   dm: boolean
   onTokenMoved: (move: { tokenId: string, x: number, y: number }) => void
   onFogUpdated: (fog: SceneDto['fog']) => void
+  onMapMeasured: (size: { height: number, width: number }) => void
   focusToken?: { x: number, y: number, tick: number } | null
 }) {
-  const cell = props.scene.grid.cellSize
-  const columns = props.scene.grid.columns
-  const rows = props.scene.grid.rows
-  const width = columns * cell
-  const height = rows * cell
+  const grid = readBoardGrid(props.scene.grid)
+  const { columns, rows } = grid
+  const image = usePortrait(props.scene.imageUrl)
+  const mapPixels = image
+    ? { height: image.naturalHeight * grid.imageScale, width: image.naturalWidth * grid.imageScale }
+    : null
+  const { width, height } = boardSize(grid, mapPixels)
+  const picture = mapOrigin(grid)
   const [tool, setTool] = useState<Tool>('move')
   const [anchor, setAnchor] = useState<CellPoint | null>(null)
   const [hover, setHover] = useState<CellPoint | null>(null)
   const [reachFeet, setReachFeet] = useState(30)
   const [radiusFeet, setRadiusFeet] = useState(20)
-  const [fogDraft, setFogDraft] = useState<CellPoint[]>([])
-  const [image, setImage] = useState<HTMLImageElement | null>(null)
+  const [fogDrag, setFogDrag] = useState<{ anchor: CellPoint, aim: CellPoint } | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const fogDragRef = useRef<{ anchor: CellPoint, aim: CellPoint } | null>(null)
+  const fogUpRef = useRef<(() => void) | null>(null)
   const draggedRef = useRef(false)
+  const fittedRef = useRef(true)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const focus = props.focusToken
+  const gridRef = useRef(grid)
+  gridRef.current = grid
+  const onMapMeasured = props.onMapMeasured
 
   useEffect(() => {
-    if (!props.scene.imageUrl)
+    if (!image)
       return
-    let alive = true
-    const next = new window.Image()
-    next.onload = () => {
-      if (alive)
-        setImage(next)
+    onMapMeasured({ height: image.naturalHeight, width: image.naturalWidth })
+  }, [image, onMapMeasured])
+
+  useEffect(() => {
+    fittedRef.current = true
+  }, [props.scene.id, width, height])
+
+  useEffect(() => {
+    const node = scrollerRef.current
+    if (!node)
+      return
+    const fit = () => {
+      if (!fittedRef.current)
+        return
+      const next = Math.min(node.clientWidth / width, node.clientHeight / height)
+      setZoom(next > 0.05 ? next : 1)
     }
-    next.src = props.scene.imageUrl
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      fittedRef.current = false
+      const factor = event.deltaY > 0 ? 0.9 : 1.1
+      setZoom(current => clamp(current * factor, 0.15, 4))
+    }
+    const observer = new ResizeObserver(fit)
+    observer.observe(node)
+    const frame = window.requestAnimationFrame(fit)
+    node.addEventListener('wheel', onWheel, { passive: false })
     return () => {
-      alive = false
+      window.cancelAnimationFrame(frame)
+      observer.disconnect()
+      node.removeEventListener('wheel', onWheel)
     }
-  }, [props.scene.imageUrl])
+  }, [width, height])
 
   useEffect(() => {
     const node = scrollerRef.current
     if (!focus || !node)
       return
+    const center = cellCenter(gridRef.current, focus.x, focus.y)
     node.scrollTo({
-      left: Math.max(0, (focus.x + 0.5) * cell - node.clientWidth / 2),
-      top: Math.max(0, (focus.y + 0.5) * cell - node.clientHeight / 2),
+      left: Math.max(0, center.x * zoom - node.clientWidth / 2),
+      top: Math.max(0, center.y * zoom - node.clientHeight / 2),
       behavior: 'smooth',
     })
-  }, [focus, cell])
+  }, [focus, grid.cellSize, grid.columns, grid.kind, grid.rows, zoom])
+
+  useEffect(() => () => {
+    if (fogUpRef.current)
+      window.removeEventListener('mouseup', fogUpRef.current)
+  }, [])
+
+  function resetFog() {
+    fogDragRef.current = null
+    setFogDrag(null)
+    props.onFogUpdated([])
+  }
+
+  function coverMap() {
+    fogDragRef.current = null
+    setFogDrag(null)
+    props.onFogUpdated([{ id: crypto.randomUUID(), points: polygonOf({ x: 0, y: 0, w: columns, h: rows }) }])
+  }
 
   function selectTool(next: Tool) {
     setTool(next)
     setAnchor(null)
-    if (next !== 'fog')
-      setFogDraft([])
+    fogDragRef.current = null
+    setFogDrag(null)
   }
 
-  function cellOf(x: number, y: number): CellPoint {
-    return {
-      x: clamp(Math.floor(x / cell), 0, columns - 1),
-      y: clamp(Math.floor(y / cell), 0, rows - 1),
-    }
+  function cellOf(x: number, y: number) {
+    return cellAt(grid, x, y)
+  }
+
+  function zoomOut() {
+    fittedRef.current = false
+    setZoom(current => clamp(current / 1.1, 0.15, 4))
+  }
+
+  function zoomIn() {
+    fittedRef.current = false
+    setZoom(current => clamp(current * 1.1, 0.15, 4))
+  }
+
+  function zoomFit() {
+    fittedRef.current = true
+    setZoom(fitZoom(scrollerRef.current, width, height))
   }
 
   function readCell(event: StagePointerEvent) {
@@ -111,6 +174,38 @@ export function MapBoard(props: {
     if (!point)
       return
     setHover(current => sameCell(current, point) ? current : point)
+    const drag = fogDragRef.current
+    if (!drag || sameCell(drag.aim, point))
+      return
+    drag.aim = point
+    setFogDrag({ anchor: drag.anchor, aim: point })
+  }
+
+  function onStageDown(event: StagePointerEvent) {
+    if (tool !== 'fog' || !props.dm)
+      return
+    const point = readCell(event)
+    if (!point)
+      return
+    const drag = { anchor: point, aim: point }
+    fogDragRef.current = drag
+    setFogDrag(drag)
+    if (fogUpRef.current)
+      window.removeEventListener('mouseup', fogUpRef.current)
+    const finish = () => {
+      window.removeEventListener('mouseup', finish)
+      fogUpRef.current = null
+      const current = fogDragRef.current
+      fogDragRef.current = null
+      setFogDrag(null)
+      if (!current)
+        return
+      const area = cellSpan(current.anchor, current.aim)
+      const next = cellCovered(props.scene.fog, current.anchor) ? cutFog(props.scene.fog, area) : paintFog(props.scene.fog, area)
+      props.onFogUpdated(next)
+    }
+    fogUpRef.current = finish
+    window.addEventListener('mouseup', finish)
   }
 
   function onStageClick(event: StagePointerEvent) {
@@ -119,19 +214,8 @@ export function MapBoard(props: {
       return
     }
     const point = readCell(event)
-    if (!point || tool === 'move')
+    if (!point || tool === 'move' || tool === 'fog')
       return
-    if (tool === 'fog' && props.dm) {
-      const covered = props.scene.fog.find(polygon => sameCell(squareOf(polygon.points), point))
-      if (covered) {
-        props.onFogUpdated(props.scene.fog.filter(polygon => polygon.id !== covered.id))
-        return
-      }
-      setFogDraft(cells => cells.some(item => sameCell(item, point))
-        ? cells.filter(item => !sameCell(item, point))
-        : [...cells, point])
-      return
-    }
     setAnchor(point)
     setHover(point)
   }
@@ -148,7 +232,9 @@ export function MapBoard(props: {
     cone: setReachFeet,
     line: setReachFeet,
   }
-  const measure = measureLabel(tool, Boolean(anchor), origin, aim, template.length, fogDraft.length, reachFeet, radiusFeet, columns, rows)
+  const fogSpan = fogDrag ? cellSpan(fogDrag.anchor, fogDrag.aim) : null
+  const fogErase = fogDrag ? cellCovered(props.scene.fog, fogDrag.anchor) : false
+  const measure = measureLabel(tool, Boolean(anchor), origin, aim, template.length, fogSpan ? fogSpan.w * fogSpan.h : 0, reachFeet, radiusFeet, columns, rows)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -160,23 +246,19 @@ export function MapBoard(props: {
           {props.dm && (
             <>
               <Button size="xs" variant={tool === 'fog' ? 'filled' : 'default'} onClick={() => selectTool('fog')}>Туман</Button>
-              <Button
-                size="xs"
-                variant="light"
-                disabled={fogDraft.length === 0}
-                onClick={() => {
-                  props.onFogUpdated([
-                    ...props.scene.fog,
-                    ...fogDraft.map(item => ({ id: crypto.randomUUID(), points: cellSquare(item) })),
-                  ])
-                  setFogDraft([])
-                }}
-              >
-                Наложить туман
-              </Button>
-              <Button size="xs" variant="default" onClick={() => props.onFogUpdated([])}>Сбросить туман</Button>
+              <Button size="xs" variant="light" onClick={coverMap}>Туман на всю карту</Button>
+              <Button size="xs" variant="default" onClick={resetFog}>Сбросить туман</Button>
             </>
           )}
+          <ActionIcon size="sm" variant="default" aria-label="Мельче" onClick={zoomOut}>
+            <IconMinus size={14} />
+          </ActionIcon>
+          <ActionIcon size="sm" variant="default" aria-label="Крупнее" onClick={zoomIn}>
+            <IconPlus size={14} />
+          </ActionIcon>
+          <ActionIcon size="sm" variant="default" aria-label="Вписать" onClick={zoomFit}>
+            <IconArrowsMaximize size={14} />
+          </ActionIcon>
         </Group>
         {size && (
           <ReachControl
@@ -188,73 +270,63 @@ export function MapBoard(props: {
         )}
         <Text size="xs" c="dimmed">{measure}</Text>
       </Stack>
-      <div ref={scrollerRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        <Stage width={width} height={height} onClick={onStageClick} onMouseMove={onStageMove}>
-          <Layer>
-            <Rect width={width} height={height} fill="#1b1724" />
-            {props.scene.imageUrl && image && (
-              <MapImage image={image} width={width} height={height} listening={false} />
-            )}
-            {Array.from({ length: columns + 1 }, (_, index) => (
-              <Line key={`v${index}`} points={[index * cell, 0, index * cell, height]} stroke="#3a3348" listening={false} />
-            ))}
-            {Array.from({ length: rows + 1 }, (_, index) => (
-              <Line key={`h${index}`} points={[0, index * cell, width, index * cell]} stroke="#3a3348" listening={false} />
-            ))}
-            {props.scene.fog.map(polygon => (
-              <Line
-                key={polygon.id}
-                points={polygon.points.map(point => point * cell)}
-                closed
-                fill={props.dm ? 'rgba(8,6,12,0.55)' : '#05040a'}
-                listening={false}
-              />
-            ))}
-            <CellMarks cells={template} cell={cell} fill={tool === 'ruler' ? 'rgba(143,208,255,0.35)' : 'rgba(212,93,93,0.35)'} />
-            <CellMarks cells={fogDraft} cell={cell} fill="rgba(240,213,140,0.45)" />
-            {tool === 'fog' && hover && (
-              <Rect x={hover.x * cell} y={hover.y * cell} width={cell} height={cell} stroke="#f0d58c" strokeWidth={2} listening={false} />
-            )}
-            {anchor && hover && aimsWithPointer(tool) && !sameCell(anchor, hover) && (
-              <Line
-                points={[(anchor.x + 0.5) * cell, (anchor.y + 0.5) * cell, (hover.x + 0.5) * cell, (hover.y + 0.5) * cell]}
-                stroke="#f4efe4"
-                dash={[6, 4]}
-                listening={false}
-              />
-            )}
-            {anchor && tool !== 'move' && tool !== 'fog' && (
-              <Rect x={anchor.x * cell} y={anchor.y * cell} width={cell} height={cell} stroke="#f4efe4" strokeWidth={2} listening={false} />
-            )}
-            {props.tokens.map(token => (
-              <TokenPiece
-                key={token.id}
-                token={token}
-                cell={cell}
-                columns={columns}
-                rows={rows}
-                imageUrl={token.obscured ? null : token.imageUrl}
-                draggable={tool === 'move'}
-                onDragged={() => {
-                  draggedRef.current = true
-                }}
-                onMoved={props.onTokenMoved}
-              />
-            ))}
-            {props.tokens.filter(token => token.obscured).map(token => (
-              <Rect
-                key={`unknown-${token.id}`}
-                x={token.x * cell + 2}
-                y={token.y * cell + 2}
-                width={cell - 4}
-                height={cell - 4}
-                stroke="#f0d58c"
-                strokeWidth={3}
-                listening={false}
-              />
-            ))}
-          </Layer>
-        </Stage>
+      <div ref={scrollerRef} style={{ flex: 1, minHeight: 0, minWidth: 0, width: '100%', overflow: 'auto' }}>
+        <div style={{ height: height * zoom, width: width * zoom }}>
+          <div style={{ height, imageRendering: grid.smoothing === 'nearest' ? 'pixelated' : 'auto', transform: `scale(${zoom})`, transformOrigin: '0 0', width }}>
+            <Stage width={width} height={height} onClick={onStageClick} onMouseDown={onStageDown} onMouseMove={onStageMove}>
+              <Layer imageSmoothingEnabled={grid.smoothing !== 'nearest'}>
+                <Rect width={width} height={height} fill="#1b1724" />
+                {props.scene.imageUrl && image && mapPixels && (
+                  <MapImage
+                    image={image}
+                    x={picture.x}
+                    y={picture.y}
+                    width={mapPixels.width}
+                    height={mapPixels.height}
+                    listening={false}
+                  />
+                )}
+                <GridLines grid={grid} />
+                <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} />
+                <CellMarks cells={template} grid={grid} fill={tool === 'ruler' ? 'rgba(143,208,255,0.35)' : 'rgba(212,93,93,0.35)'} />
+                {fogSpan && (
+                  <CellMarks
+                    cells={cellsInSpan(fogSpan)}
+                    grid={grid}
+                    fill={fogErase ? 'rgba(143,208,255,0.35)' : 'rgba(240,213,140,0.45)'}
+                  />
+                )}
+                {tool === 'fog' && hover && !fogDrag && (
+                  <Line points={cellOutline(grid, hover.x, hover.y)} closed stroke="#f0d58c" strokeWidth={2} listening={false} />
+                )}
+                {anchor && hover && aimsWithPointer(tool) && !sameCell(anchor, hover) && (
+                  <Line
+                    points={lineBetween(grid, anchor, hover)}
+                    stroke="#f4efe4"
+                    dash={[6, 4]}
+                    listening={false}
+                  />
+                )}
+                {anchor && tool !== 'move' && tool !== 'fog' && (
+                  <Line points={cellOutline(grid, anchor.x, anchor.y)} closed stroke="#f4efe4" strokeWidth={2} listening={false} />
+                )}
+                {props.tokens.map(token => (
+                  <TokenPiece
+                    key={token.id}
+                    token={token}
+                    grid={grid}
+                    imageUrl={token.obscured ? null : token.imageUrl}
+                    draggable={tool === 'move'}
+                    onDragged={() => {
+                      draggedRef.current = true
+                    }}
+                    onMoved={props.onTokenMoved}
+                  />
+                ))}
+              </Layer>
+            </Stage>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -262,39 +334,36 @@ export function MapBoard(props: {
 
 function TokenPiece(props: {
   token: TokenDto
-  cell: number
-  columns: number
-  rows: number
+  grid: ReturnType<typeof readBoardGrid>
   imageUrl: string | null
   draggable: boolean
   onDragged: () => void
   onMoved: (move: { tokenId: string, x: number, y: number }) => void
 }) {
-  const radius = Math.max(props.token.size, 1) * props.cell / 2
-  const labelWidth = props.cell * 3
+  const { width, height } = boardSize(props.grid)
+  const center = cellCenter(props.grid, props.token.x, props.token.y)
+  const radius = Math.max(props.token.size, 1) * props.grid.cellSize / 2
+  const labelWidth = props.grid.cellSize * 3
   const unknown = props.token.obscured
   const portrait = usePortrait(props.imageUrl)
   const frame = portrait ? coverBox(portrait, radius * 2) : null
   return (
     <ShapeGroup
-      x={(props.token.x + 0.5) * props.cell}
-      y={(props.token.y + 0.5) * props.cell}
+      x={center.x}
+      y={center.y}
       opacity={props.token.hidden ? 0.4 : 1}
       draggable={props.draggable}
       listening={props.draggable}
       dragBoundFunc={pos => ({
-        x: clamp(pos.x, radius, props.columns * props.cell - radius),
-        y: clamp(pos.y, radius, props.rows * props.cell - radius),
+        x: clamp(pos.x, radius, width - radius),
+        y: clamp(pos.y, radius, height - radius),
       })}
       onDragEnd={(event) => {
         props.onDragged()
-        const cellX = clamp(Math.round(event.target.x() / props.cell - 0.5), 0, props.columns - 1)
-        const cellY = clamp(Math.round(event.target.y() / props.cell - 0.5), 0, props.rows - 1)
-        event.target.position({
-          x: (cellX + 0.5) * props.cell,
-          y: (cellY + 0.5) * props.cell,
-        })
-        props.onMoved({ tokenId: props.token.id, x: cellX, y: cellY })
+        const next = cellAt(props.grid, event.target.x(), event.target.y())
+        const snapped = cellCenter(props.grid, next.x, next.y)
+        event.target.position(snapped)
+        props.onMoved({ tokenId: props.token.id, x: next.x, y: next.y })
       }}
     >
       <Circle radius={radius} fill={tokenFill(props.token)} />
@@ -404,33 +473,185 @@ function ReachControl(props: { label: string, feet: number, presets: number[], o
   )
 }
 
-function CellMarks(props: { cells: CellPoint[], cell: number, fill: string }) {
-  return props.cells.map(point => (
-    <Rect
-      key={`${point.x},${point.y}`}
-      x={point.x * props.cell}
-      y={point.y * props.cell}
-      width={props.cell}
-      height={props.cell}
-      fill={props.fill}
+function CellMarks(props: { cells: CellPoint[], grid: ReturnType<typeof readBoardGrid>, fill: string }) {
+  return (
+    <ShapeGroup listening={false}>
+      {props.cells.map(point => (
+        <Line
+          key={`${point.x},${point.y}`}
+          points={cellOutline(props.grid, point.x, point.y)}
+          closed
+          fill={props.fill}
+          listening={false}
+        />
+      ))}
+    </ShapeGroup>
+  )
+}
+
+function GridLines(props: { grid: ReturnType<typeof readBoardGrid> }) {
+  if (props.grid.kind === 'hex') {
+    const lines = []
+    for (let row = 0; row < props.grid.rows; row += 1) {
+      for (let col = 0; col < props.grid.columns; col += 1) {
+        lines.push(
+          <Line
+            key={`${col},${row}`}
+            points={cellOutline(props.grid, col, row)}
+            closed
+            stroke={props.grid.color}
+            opacity={props.grid.opacity}
+            listening={false}
+          />,
+        )
+      }
+    }
+    return <ShapeGroup listening={false}>{lines}</ShapeGroup>
+  }
+  const shift = gridShift(props.grid)
+  const gridWidth = props.grid.columns * props.grid.cellSize
+  const gridHeight = props.grid.rows * props.grid.cellSize
+  return (
+    <>
+      {Array.from({ length: props.grid.columns + 1 }, (_, index) => (
+        <Line
+          key={`v${index}`}
+          points={[shift.x + index * props.grid.cellSize, shift.y, shift.x + index * props.grid.cellSize, shift.y + gridHeight]}
+          stroke={props.grid.color}
+          opacity={props.grid.opacity}
+          listening={false}
+        />
+      ))}
+      {Array.from({ length: props.grid.rows + 1 }, (_, index) => (
+        <Line
+          key={`h${index}`}
+          points={[shift.x, shift.y + index * props.grid.cellSize, shift.x + gridWidth, shift.y + index * props.grid.cellSize]}
+          stroke={props.grid.color}
+          opacity={props.grid.opacity}
+          listening={false}
+        />
+      ))}
+    </>
+  )
+}
+
+function FogLayer(props: { fog: SceneDto['fog'], grid: ReturnType<typeof readBoardGrid>, dm: boolean }) {
+  const fill = props.dm ? 'rgba(8,6,12,0.55)' : '#05040a'
+  if (props.grid.kind === 'hex') {
+    const covered = []
+    for (let row = 0; row < props.grid.rows; row += 1) {
+      for (let col = 0; col < props.grid.columns; col += 1) {
+        if (cellCovered(props.fog, { x: col, y: row }))
+          covered.push({ x: col, y: row })
+      }
+    }
+    return <CellMarks cells={covered} grid={props.grid} fill={fill} />
+  }
+  return props.fog.map(polygon => (
+    <Line
+      key={polygon.id}
+      points={cellSpaceToPixels(props.grid, polygon.points)}
+      closed
+      fill={fill}
       listening={false}
     />
   ))
+}
+
+function cellsInSpan(span: FogRect) {
+  const cells: CellPoint[] = []
+  for (let y = span.y; y < span.y + span.h; y += 1) {
+    for (let x = span.x; x < span.x + span.w; x += 1)
+      cells.push({ x, y })
+  }
+  return cells
+}
+
+function lineBetween(grid: ReturnType<typeof readBoardGrid>, start: CellPoint, end: CellPoint) {
+  const from = cellCenter(grid, start.x, start.y)
+  const to = cellCenter(grid, end.x, end.y)
+  return [from.x, from.y, to.x, to.y]
+}
+
+function fitZoom(node: HTMLDivElement | null, width: number, height: number) {
+  if (!node || width <= 0 || height <= 0)
+    return 1
+  const next = Math.min(node.clientWidth / width, node.clientHeight / height)
+  return next > 0.05 ? next : 1
 }
 
 function sameCell(left: CellPoint | null, right: CellPoint) {
   return left?.x === right.x && left.y === right.y
 }
 
-function cellSquare(point: CellPoint) {
-  return [point.x, point.y, point.x + 1, point.y, point.x + 1, point.y + 1, point.x, point.y + 1]
+interface FogRect {
+  x: number
+  y: number
+  w: number
+  h: number
 }
 
-function squareOf(points: number[]): CellPoint | null {
+function cellSpan(start: CellPoint, end: CellPoint): FogRect {
+  const x = Math.min(start.x, end.x)
+  const y = Math.min(start.y, end.y)
+  return { x, y, w: Math.abs(start.x - end.x) + 1, h: Math.abs(start.y - end.y) + 1 }
+}
+
+function polygonOf(rect: FogRect) {
+  const { x, y, w, h } = rect
+  return [x, y, x + w, y, x + w, y + h, x, y + h]
+}
+
+function rectOf(points: number[]): FogRect | null {
   const [x, y, x2, y2, x3, y3, x4, y4] = points
-  if (points.length !== 8 || x2 !== x + 1 || y2 !== y || x3 !== x + 1 || y3 !== y + 1 || x4 !== x || y4 !== y + 1)
+  if (points.length !== 8 || x == null || y == null || x2 == null || y3 == null)
     return null
-  return { x: x ?? 0, y: y ?? 0 }
+  const w = x2 - x
+  const h = y3 - y
+  if (w <= 0 || h <= 0 || y2 !== y || x3 !== x2 || y4 !== y3 || x4 !== x)
+    return null
+  return { x, y, w, h }
+}
+
+function cellCovered(fog: { points: number[] }[], point: CellPoint) {
+  return fog.some((polygon) => {
+    const rect = rectOf(polygon.points)
+    if (!rect)
+      return false
+    return point.x >= rect.x && point.y >= rect.y && point.x < rect.x + rect.w && point.y < rect.y + rect.h
+  })
+}
+
+function subtractRect(source: FogRect, cut: FogRect): FogRect[] {
+  const left = Math.max(source.x, cut.x)
+  const top = Math.max(source.y, cut.y)
+  const right = Math.min(source.x + source.w, cut.x + cut.w)
+  const bottom = Math.min(source.y + source.h, cut.y + cut.h)
+  if (left >= right || top >= bottom)
+    return [source]
+  const pieces: FogRect[] = []
+  if (left > source.x)
+    pieces.push({ x: source.x, y: source.y, w: left - source.x, h: source.h })
+  if (right < source.x + source.w)
+    pieces.push({ x: right, y: source.y, w: source.x + source.w - right, h: source.h })
+  if (top > source.y)
+    pieces.push({ x: left, y: source.y, w: right - left, h: top - source.y })
+  if (bottom < source.y + source.h)
+    pieces.push({ x: left, y: bottom, w: right - left, h: source.y + source.h - bottom })
+  return pieces
+}
+
+function cutFog(fog: SceneDto['fog'], cut: FogRect): SceneDto['fog'] {
+  return fog.flatMap((polygon) => {
+    const rect = rectOf(polygon.points)
+    if (!rect)
+      return [polygon]
+    return subtractRect(rect, cut).map(piece => ({ id: crypto.randomUUID(), points: polygonOf(piece) }))
+  })
+}
+
+function paintFog(fog: SceneDto['fog'], area: FogRect): SceneDto['fog'] {
+  return [...cutFog(fog, area), { id: crypto.randomUUID(), points: polygonOf(area) }]
 }
 
 function heading(origin: CellPoint, aim: CellPoint | null) {
@@ -461,19 +682,46 @@ function circleCells(origin: CellPoint, radius: number, columns: number, rows: n
 }
 
 function coneCells(origin: CellPoint, aim: CellPoint | null, length: number, columns: number, rows: number) {
-  const aimPoint = heading(origin, aim)
+  const dir = coneOctant(origin, aim)
+  const place = dir.x !== 0 && dir.y !== 0 ? diagonalConeSquare : orthogonalConeSquare
   const cells: CellPoint[] = []
-  for (let y = 0; y < rows; y += 1) {
-    for (let x = 0; x < columns; x += 1) {
-      if (x === origin.x && y === origin.y)
+  const seen = new Set<string>()
+  for (let rank = 1; rank <= length; rank += 1) {
+    for (let index = 0; index < rank; index += 1) {
+      const point = place(origin, dir, rank, index)
+      const key = `${point.x},${point.y}`
+      if (seen.has(key) || !inside(point, columns, rows))
         continue
-      const along = (x - origin.x) * aimPoint.x + (y - origin.y) * aimPoint.y
-      const aside = Math.abs((x - origin.x) * -aimPoint.y + (y - origin.y) * aimPoint.x)
-      if (along >= 0.5 && along <= length && aside <= along / 2)
-        cells.push({ x, y })
+      seen.add(key)
+      cells.push(point)
     }
   }
   return cells
+}
+
+function coneOctant(origin: CellPoint, aim: CellPoint | null) {
+  const dx = aim && !sameCell(aim, origin) ? aim.x - origin.x : 0
+  const dy = aim && !sameCell(aim, origin) ? aim.y - origin.y : 1
+  const octant = Math.round(Math.atan2(dy, dx) / (Math.PI / 4))
+  const angle = octant * (Math.PI / 4)
+  return { x: Math.round(Math.cos(angle)), y: Math.round(Math.sin(angle)) }
+}
+
+function orthogonalConeSquare(origin: CellPoint, dir: CellPoint, rank: number, index: number) {
+  const lateral = index - Math.floor((rank - 1) / 2)
+  return {
+    x: origin.x + dir.x * rank - dir.y * lateral,
+    y: origin.y + dir.y * rank + dir.x * lateral,
+  }
+}
+
+function diagonalConeSquare(origin: CellPoint, dir: CellPoint, rank: number, index: number) {
+  if (index === 0)
+    return { x: origin.x + dir.x * rank, y: origin.y + dir.y * rank }
+  const step = Math.ceil(index / 2)
+  if (index % 2 === 1)
+    return { x: origin.x + dir.x * rank, y: origin.y + dir.y * (rank - step) }
+  return { x: origin.x + dir.x * (rank - step), y: origin.y + dir.y * rank }
 }
 
 function lineCells(origin: CellPoint, aim: CellPoint | null, length: number, columns: number, rows: number) {
@@ -537,7 +785,7 @@ function measureLabel(tool: Tool, placed: boolean, origin: CellPoint | null, aim
   const steps = origin && aim ? Math.max(Math.abs(aim.x - origin.x), Math.abs(aim.y - origin.y)) : 0
   const hintByTool: Record<Tool, string> = {
     move: `Поле ${columns}×${rows} · клетка 5 футов`,
-    fog: fogCells > 0 ? `Туман: ${fogCells} кл. в черновике. Клик красит, повтор стирает` : 'Туман: курсор показывает клетку. Клик красит, повтор стирает',
+    fog: fogCells > 0 ? `Прямоугольник: ${fogCells} кл. Отпусти, чтобы применить` : 'Тяни прямоугольник. С пустой клетки ставит туман, с туманной снимает',
     ruler: placed ? `Линейка: ${steps} кл. · ${steps * feetPerCell} футов. Веди мышь. Клик переносит начало` : 'Линейка: клик ставит начало, длина идёт за курсором',
     circle: placed ? `Шар: радиус ${radiusFeet} футов · ${cells} кл. Клик переносит центр` : `Шар: радиус ${radiusFeet} футов. Шаблон за курсором, клик ставит центр`,
     cone: placed ? `Конус: ${reachFeet} футов · ${cells} кл. Веди мышь — направление` : `Конус: ${reachFeet} футов. Шаблон за курсором, клик ставит источник`,

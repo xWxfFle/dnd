@@ -32,17 +32,11 @@ export const scene = computed(() => {
 
 export const dm = computed(() => liveSnapshot.value?.campaign.role === 'dm')
 
+export const viewerId = computed(() => readUserId())
+
 export const monsters = computed(() => (srdQuery.data.value ?? []).filter(entry => entry.kind === 'monster'))
 
-export const roster = computed(() => {
-  const snapshot = liveSnapshot.value
-  if (!snapshot)
-    return []
-  if (snapshot.campaign.role === 'dm')
-    return snapshot.characters
-  const userId = readUserId()
-  return snapshot.characters.filter(character => character.userId === userId)
-})
+export const roster = computed(() => liveSnapshot.value?.characters ?? [])
 
 export const sheets = computed(() => {
   const userId = readUserId()
@@ -75,7 +69,17 @@ export const notes = store('')
 export const columns = store(20)
 export const rows = store(14)
 export const cellSize = store(48)
+export const gridKind = store<'square' | 'hex'>('square')
+export const gridColor = store('#3a3348')
+export const gridOpacity = store(1)
+export const imageScale = store(1)
+export const offsetX = store(0)
+export const offsetY = store(0)
+export const smoothing = store<'linear' | 'nearest'>('linear')
+export const mapWidth = store(0)
+export const mapHeight = store(0)
 const gridKey = store('')
+const mapSceneId = store<string | null>(null)
 const notesSceneId = store<string | null>(null)
 
 export const sheetRollModes = ['normal', 'advantage', 'disadvantage'] as const
@@ -95,6 +99,14 @@ export const gridPresetChosen = event<(typeof fieldPresets)[number]>()
 export const columnsChanged = event<string | number>()
 export const rowsChanged = event<string | number>()
 export const cellSizeChanged = event<string | number>()
+export const gridKindChanged = event<string>()
+export const gridColorChanged = event<string>()
+export const gridOpacityChanged = event<number>()
+export const imageScaleChanged = event<number>()
+export const offsetXChanged = event<string | number>()
+export const offsetYChanged = event<string | number>()
+export const smoothingChanged = event<string>()
+export const mapMeasured = event<{ height: number, width: number }>()
 export const gridApplyRequested = event<void>()
 export const notesChanged = event<string>()
 export const notesSaveRequested = event<void>()
@@ -201,12 +213,24 @@ export function bootTableModel() {
         const current = snapshot.scenes.find(item => item.active) ?? snapshot.scenes[0]
         if (!current)
           return
-        const nextKey = `${current.id}:${current.grid.columns}:${current.grid.rows}:${current.grid.cellSize}`
+        const nextKey = gridKeyOf(current.id, current.grid)
         if (gridKey.value !== nextKey) {
           gridKey.value = nextKey
           columns.value = current.grid.columns
           rows.value = current.grid.rows
           cellSize.value = current.grid.cellSize
+          gridKind.value = kindOf(current.grid.kind)
+          gridColor.value = hexColor(current.grid.color)
+          gridOpacity.value = clampNumber(current.grid.opacity ?? 1, 0, 1)
+          imageScale.value = clampNumber(current.grid.imageScale ?? 1, 0.1, 8)
+          offsetX.value = clampInt(current.grid.offsetX ?? 0, -4000, 4000)
+          offsetY.value = clampInt(current.grid.offsetY ?? 0, -4000, 4000)
+          smoothing.value = smoothingOf(current.grid.smoothing)
+        }
+        if (mapSceneId.value !== current.id) {
+          mapSceneId.value = current.id
+          mapWidth.value = 0
+          mapHeight.value = 0
         }
         if (notesSceneId.value !== current.id) {
           notesSceneId.value = current.id
@@ -223,7 +247,7 @@ export function bootTableModel() {
     reaction({
       on: notesChanged,
       run(value) {
-        notes.value = value
+        notes.value = value.slice(0, 20000)
       },
     })
     reaction({
@@ -254,6 +278,55 @@ export function bootTableModel() {
       on: cellSizeChanged,
       run(value) {
         cellSize.value = readCount(value, cellSize.value)
+      },
+    })
+    reaction({
+      on: gridKindChanged,
+      run(value) {
+        gridKind.value = kindOf(value)
+      },
+    })
+    reaction({
+      on: gridColorChanged,
+      run(value) {
+        gridColor.value = value.slice(0, 7)
+      },
+    })
+    reaction({
+      on: gridOpacityChanged,
+      run(value) {
+        gridOpacity.value = clampNumber(value, 0, 1)
+      },
+    })
+    reaction({
+      on: imageScaleChanged,
+      run(value) {
+        imageScale.value = clampNumber(value, 0.1, 8)
+      },
+    })
+    reaction({
+      on: offsetXChanged,
+      run(value) {
+        offsetX.value = clampInt(readCount(value, offsetX.value), -4000, 4000)
+      },
+    })
+    reaction({
+      on: offsetYChanged,
+      run(value) {
+        offsetY.value = clampInt(readCount(value, offsetY.value), -4000, 4000)
+      },
+    })
+    reaction({
+      on: smoothingChanged,
+      run(value) {
+        smoothing.value = smoothingOf(value)
+      },
+    })
+    reaction({
+      on: mapMeasured,
+      run(size) {
+        mapWidth.value = size.width
+        mapHeight.value = size.height
       },
     })
     reaction({
@@ -308,11 +381,12 @@ export function bootTableModel() {
         columns.value = preset.columns
         rows.value = preset.rows
         cellSize.value = preset.cellSize
-        gridKey.value = `${current.id}:${preset.columns}:${preset.rows}:${preset.cellSize}`
+        const grid = gridBody()
+        gridKey.value = gridKeyOf(current.id, grid)
         void commandFx({
           path: `${base}/scenes/${current.id}`,
           method: 'PATCH',
-          body: { grid: { columns: preset.columns, rows: preset.rows, cellSize: preset.cellSize } },
+          body: { grid },
         })
       },
     })
@@ -323,15 +397,18 @@ export function bootTableModel() {
         const base = campaignBase()
         if (!current || !base)
           return
-        const grid = {
-          columns: clampInt(columns.value, 1, 200),
-          rows: clampInt(rows.value, 1, 200),
-          cellSize: clampInt(cellSize.value, 8, 256),
-        }
+        const grid = gridBody()
         columns.value = grid.columns
         rows.value = grid.rows
         cellSize.value = grid.cellSize
-        gridKey.value = `${current.id}:${grid.columns}:${grid.rows}:${grid.cellSize}`
+        gridKind.value = grid.kind
+        gridColor.value = grid.color
+        gridOpacity.value = grid.opacity
+        imageScale.value = grid.imageScale
+        offsetX.value = grid.offsetX
+        offsetY.value = grid.offsetY
+        smoothing.value = grid.smoothing
+        gridKey.value = gridKeyOf(current.id, grid)
         void commandFx({ path: `${base}/scenes/${current.id}`, method: 'PATCH', body: { grid } })
       },
     })
@@ -340,7 +417,7 @@ export function bootTableModel() {
       run() {
         const current = scene.value
         const base = campaignBase()
-        if (!current || !base)
+        if (!current || !base || notesSceneId.value !== current.id)
           return
         void commandFx({ path: `${base}/scenes/${current.id}`, method: 'PATCH', body: { dmNotes: notes.value } })
       },
@@ -688,6 +765,13 @@ export function bootTableModel() {
     reaction({
       on: fogUpdated,
       run({ sceneId, fog }) {
+        const snapshot = liveSnapshot.value
+        if (snapshot) {
+          liveSnapshot.value = {
+            ...snapshot,
+            scenes: snapshot.scenes.map(item => item.id === sceneId ? { ...item, fog } : item),
+          }
+        }
         void sendLiveFx({ type: 'fog', sceneId, fog })
       },
     })
@@ -816,6 +900,64 @@ function copyNames(base: string, tokens: { name: string, monsterId: string | nul
     number += 1
   }
   return names
+}
+
+const kindByValue: Record<string, 'square' | 'hex' | undefined> = {
+  hex: 'hex',
+  square: 'square',
+}
+
+function kindOf(value: string | undefined) {
+  return kindByValue[value ?? ''] ?? 'square'
+}
+
+const smoothingByValue: Record<string, 'linear' | 'nearest' | undefined> = {
+  linear: 'linear',
+  nearest: 'nearest',
+}
+
+function smoothingOf(value: string | undefined) {
+  return smoothingByValue[value ?? ''] ?? 'linear'
+}
+
+function hexColor(value: string | undefined) {
+  return value && /^#[0-9a-f]{6}$/i.test(value) ? value : '#3a3348'
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (Number.isNaN(value))
+    return min
+  return Math.min(max, Math.max(min, value))
+}
+
+function gridBody() {
+  return {
+    cellSize: clampInt(cellSize.value, 8, 256),
+    color: hexColor(gridColor.value),
+    columns: clampInt(columns.value, 1, 200),
+    imageScale: clampNumber(imageScale.value, 0.1, 8),
+    kind: gridKind.value,
+    offsetX: clampInt(offsetX.value, -4000, 4000),
+    offsetY: clampInt(offsetY.value, -4000, 4000),
+    opacity: clampNumber(gridOpacity.value, 0, 1),
+    rows: clampInt(rows.value, 1, 200),
+    smoothing: smoothing.value,
+  }
+}
+
+function gridKeyOf(sceneId: string, grid: {
+  cellSize: number
+  color?: string
+  columns: number
+  imageScale?: number
+  kind?: string
+  offsetX?: number
+  offsetY?: number
+  opacity?: number
+  rows: number
+  smoothing?: string
+}) {
+  return `${sceneId}:${grid.columns}:${grid.rows}:${grid.cellSize}:${kindOf(grid.kind)}:${hexColor(grid.color)}:${clampNumber(grid.opacity ?? 1, 0, 1)}:${clampNumber(grid.imageScale ?? 1, 0.1, 8)}:${clampInt(grid.offsetX ?? 0, -4000, 4000)}:${clampInt(grid.offsetY ?? 0, -4000, 4000)}:${smoothingOf(grid.smoothing)}`
 }
 
 function readCount(value: string | number, fallback: number) {

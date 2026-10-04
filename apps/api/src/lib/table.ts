@@ -1,4 +1,5 @@
 import type { Abilities, Ability, AttackDef, CampaignRole, CharacterDto, CombatDto, DiceRollDto, DieTerm, SceneDto, Skill, SnapshotDto, TokenDto } from '@dnd/shared'
+import { statSync } from 'node:fs'
 import {
   abilities,
   abilityModifier,
@@ -124,7 +125,7 @@ export function toSceneDto(row: SceneRow, role: CampaignRole): SceneDto {
     id: row.id,
     campaignId: row.campaignId,
     name: row.name,
-    imageUrl: row.imagePath ? `/api/scenes/${row.id}/image` : null,
+    imageUrl: row.imagePath ? markedUrl(`/api/scenes/${row.id}/image`, row.imagePath) : null,
     grid: row.grid as SceneDto['grid'],
     fog: row.fog as SceneDto['fog'],
     dmNotes: role === 'dm' ? row.dmNotes : undefined,
@@ -195,6 +196,12 @@ function fileMark(filePath: string) {
   let mark = 0
   for (const char of filePath)
     mark = (mark * 31 + char.charCodeAt(0)) >>> 0
+  try {
+    mark = (mark + Math.round(statSync(filePath).mtimeMs)) >>> 0
+  }
+  catch {
+    return mark.toString(36)
+  }
   return mark.toString(36)
 }
 
@@ -414,7 +421,6 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
   const tokenRows = await listTokens(sceneRows.map(scene => scene.id), role)
   const active = sceneRows.find(scene => scene.active) ?? sceneRows[0] ?? null
   const sheetRows = await db.select().from(characters).where(eq(characters.campaignId, campaignId))
-  const visibleSheets = role === 'dm' ? sheetRows : sheetRows.filter(row => row.userId === userId)
   const concealment = role === 'dm'
     ? { hidden: new Set<string>(), obscured: new Set<string>() }
     : concealEnemies({
@@ -457,7 +463,7 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
     tokens,
     combat: concealCombat(combat, concealment),
     rolls: await listRolls(campaignId),
-    characters: visibleSheets.map(toCharacterDto),
+    characters: sheetRows.map(toCharacterDto),
   }
 }
 

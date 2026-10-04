@@ -70,7 +70,7 @@ export async function handleLiveMessage(client: Client, raw: unknown) {
     }
   }
   else if (type === 'fog' && typeof message.sceneId === 'string') {
-    await replaceFog(message.sceneId, message.fog)
+    await replaceFog(message.sceneId, Array.isArray(message.fog) ? message.fog : [])
   }
   else if (type === 'token.hide' && typeof message.tokenId === 'string') {
     await setTokenHidden(message.tokenId, Boolean(message.hidden))

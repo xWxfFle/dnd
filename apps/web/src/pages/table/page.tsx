@@ -1,6 +1,6 @@
 import type { AttackDef, CharacterDto } from '@dnd/shared'
 import { abilityModifier, isDeadFromExhaustion, readArmorClass } from '@dnd/shared'
-import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, CopyButton, Divider, Drawer, FileButton, Group, NumberInput, Paper, Select, Stack, Tabs, Text, TextInput, Title } from '@mantine/core'
+import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput, Divider, Drawer, FileButton, Group, NumberInput, Paper, SegmentedControl, Select, Slider, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
 import { MapBoard } from '@/features/table-map/board'
@@ -30,17 +30,34 @@ import {
   fieldPresets,
   fogUpdated,
   gridApplyRequested,
+  gridColor,
+  gridColorChanged,
+  gridKind,
+  gridKindChanged,
+  gridOpacity,
+  gridOpacityChanged,
   gridPresetChosen,
+  imageScale,
+  imageScaleChanged,
   inspirationToggled,
   mapFileChosen,
+  mapMeasured,
   mapName,
   mapNameChanged,
+  mapWidth,
   monsterCopies,
   monsterCopiesChanged,
   monsterId,
   monsterPlaceRequested,
   monsters,
   monsterSelected,
+  notes,
+  notesChanged,
+  notesSaveRequested,
+  offsetX,
+  offsetXChanged,
+  offsetY,
+  offsetYChanged,
   portraitChosen,
   restRequested,
   roster,
@@ -53,7 +70,10 @@ import {
   sceneTokens,
   selectedMonster,
   sheets,
+  smoothing,
+  smoothingChanged,
   tokenMoved,
+  viewerId,
 } from './model'
 import { MonsterEdit } from './monster-edit'
 
@@ -79,6 +99,7 @@ export function TablePage() {
     campaignsOpened,
     tokenMoved,
     fogUpdated,
+    mapMeasured,
   })
   const [focusToken, setFocusToken] = useState<{ x: number, y: number, tick: number } | null>(null)
   const [sheetId, setSheetId] = useState<string | null>(null)
@@ -154,11 +175,7 @@ export function TablePage() {
             )
           : <Text size="sm" lineClamp={1}>{current?.name ?? 'Нет сцены'}</Text>}
         <Group gap="xs" wrap="nowrap">
-          <CopyButton value={invite}>
-            {({ copied, copy }) => (
-              <Button size="xs" variant="default" onClick={copy}>{copied ? 'Скопировано' : 'Ссылка'}</Button>
-            )}
-          </CopyButton>
+          <InviteCopy value={invite} />
           {state.dm && <Button size="xs" variant="light" onClick={openTable}>Стол</Button>}
           <AccountMenu />
         </Group>
@@ -176,6 +193,7 @@ export function TablePage() {
                       focusToken={focusToken}
                       onTokenMoved={state.tokenMoved}
                       onFogUpdated={fog => void state.fogUpdated({ sceneId: current.id, fog })}
+                      onMapMeasured={state.mapMeasured}
                     />
                   )
                 : <Text>Нет сцены</Text>}
@@ -259,10 +277,12 @@ export function TablePage() {
 }
 
 function SheetList(props: { sheets: CharacterDto[], onOpen: (characterId: string) => void }) {
-  if (props.sheets.length === 0)
-    return null
+  const openCharacter = useUnit(characterOpened)
   return (
-    <Stack gap={4}>
+    <Stack gap="sm">
+      <Group justify="flex-end">
+        <Button size="xs" variant="light" onClick={() => void openCharacter()}>Новый герой</Button>
+      </Group>
       {props.sheets.map(sheet => (
         <Button key={sheet.id} size="xs" variant="subtle" fullWidth onClick={() => props.onOpen(sheet.id)}>
           {`${sheet.name} · ${sheet.hpCurrent}/${sheet.hpMax}`}
@@ -270,6 +290,58 @@ function SheetList(props: { sheets: CharacterDto[], onOpen: (characterId: string
       ))}
     </Stack>
   )
+}
+
+function InviteCopy(props: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  return (
+    <>
+      <Button size="xs" variant="default" title={props.value} onClick={() => void copyInvite(props.value, setCopied, setRevealed)}>
+        {copied ? 'Скопировано' : 'Ссылка'}
+      </Button>
+      {revealed && <Text size="xs" ff="monospace" style={{ userSelect: 'all' }}>{props.value}</Text>}
+    </>
+  )
+}
+
+async function copyInvite(value: string, mark: (copied: boolean) => void, reveal: (shown: boolean) => void) {
+  const ok = await writeClipboard(value)
+  if (!ok) {
+    reveal(true)
+    return
+  }
+  mark(true)
+  window.setTimeout(mark, 1200, false)
+}
+
+async function writeClipboard(value: string) {
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(value)
+      return true
+    }
+    catch {
+      // По http с чужого адреса clipboard API есть, но запись запрещена.
+    }
+  }
+  const area = document.createElement('textarea')
+  area.value = value
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.append(area)
+  area.focus()
+  area.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  }
+  catch {
+    ok = false
+  }
+  area.remove()
+  return ok
 }
 
 function ActorsPanel(props: { onOpenHero: (characterId: string) => void, onOpenToken: (tokenId: string) => void }) {
@@ -327,20 +399,47 @@ function TableSetup() {
   const state = useUnit({
     scene,
     mapName,
+    notes,
     confirmDelete,
     columns,
     rows,
     cellSize,
+    gridKind,
+    gridColor,
+    gridOpacity,
+    imageScale,
+    offsetX,
+    offsetY,
+    smoothing,
+    mapWidth,
     mapNameChanged,
+    notesChanged,
+    notesSaveRequested,
     sceneCreateRequested,
     sceneDeletePressed,
     gridPresetChosen,
     columnsChanged,
     rowsChanged,
     cellSizeChanged,
+    gridKindChanged,
+    gridColorChanged,
+    gridOpacityChanged,
+    imageScaleChanged,
+    offsetXChanged,
+    offsetYChanged,
+    smoothingChanged,
     gridApplyRequested,
   })
   const current = state.scene
+  function fitMap() {
+    if (state.mapWidth <= 0)
+      return
+    const widthByKind = {
+      hex: Math.sqrt(3) * (state.cellSize / 2) * (state.columns + 0.5),
+      square: state.columns * state.cellSize,
+    } as const satisfies Record<'hex' | 'square', number>
+    state.imageScaleChanged(widthByKind[state.gridKind] / state.mapWidth)
+  }
   return (
     <Stack gap="md">
       <Stack gap="xs">
@@ -360,8 +459,23 @@ function TableSetup() {
         </Group>
       </Stack>
       {current && (
+        <Textarea
+          size="xs"
+          label="Заметки"
+          description="Только мастер. У каждой карты свои."
+          placeholder="Ловушки, таймеры, кто что знает"
+          autosize
+          minRows={4}
+          maxRows={12}
+          resize="vertical"
+          value={state.notes}
+          onChange={event => state.notesChanged(event.currentTarget.value)}
+          onBlur={() => void state.notesSaveRequested()}
+        />
+      )}
+      {current && (
         <Stack gap="xs">
-          <Text fw={700}>Размер поля</Text>
+          <Text fw={700}>Поле</Text>
           <Group gap={6}>
             {fieldPresets.map(preset => (
               <Button
@@ -376,7 +490,46 @@ function TableSetup() {
           </Group>
           <NumberInput size="xs" label="Колонки" min={1} max={200} allowDecimal={false} value={state.columns} onChange={state.columnsChanged} />
           <NumberInput size="xs" label="Ряды" min={1} max={200} allowDecimal={false} value={state.rows} onChange={state.rowsChanged} />
-          <NumberInput size="xs" label="Клетка, px" min={8} max={256} allowDecimal={false} value={state.cellSize} onChange={state.cellSizeChanged} />
+          <NumberInput size="xs" label="Шаг сетки, px" description="Только линии. Картинка от этого не растягивается." min={8} max={256} allowDecimal={false} value={state.cellSize} onChange={state.cellSizeChanged} />
+          <NumberInput size="xs" label="Смещение по X, px" min={-4000} max={4000} allowDecimal={false} value={state.offsetX} onChange={state.offsetXChanged} />
+          <NumberInput size="xs" label="Смещение по Y, px" min={-4000} max={4000} allowDecimal={false} value={state.offsetY} onChange={state.offsetYChanged} />
+          <SegmentedControl
+            size="xs"
+            fullWidth
+            value={state.gridKind}
+            onChange={state.gridKindChanged}
+            data={[{ label: 'Квадрат', value: 'square' }, { label: 'Гекс', value: 'hex' }]}
+          />
+          <ColorInput size="xs" label="Цвет сетки" format="hex" value={state.gridColor} onChange={state.gridColorChanged} withEyeDropper={false} />
+          <Text size="xs">Прозрачность сетки</Text>
+          <Slider
+            min={0}
+            max={100}
+            step={5}
+            label={percentLabel}
+            value={Math.round(state.gridOpacity * 100)}
+            onChange={opacity => state.gridOpacityChanged(opacity / 100)}
+            thumbLabel="Прозрачность сетки"
+          />
+          <Text size="xs">Масштаб карты</Text>
+          <Text size="xs" c="dimmed">100% — размер файла. Сетка живёт отдельно.</Text>
+          <Slider
+            min={10}
+            max={800}
+            step={5}
+            label={percentLabel}
+            value={Math.round(state.imageScale * 100)}
+            onChange={scale => state.imageScaleChanged(scale / 100)}
+            thumbLabel="Масштаб карты"
+          />
+          <Button size="xs" variant="default" disabled={state.mapWidth <= 0} onClick={fitMap}>Подогнать под сетку</Button>
+          <SegmentedControl
+            size="xs"
+            fullWidth
+            value={state.smoothing}
+            onChange={state.smoothingChanged}
+            data={[{ label: 'Плавно', value: 'linear' }, { label: 'Пиксели', value: 'nearest' }]}
+          />
           <Button size="xs" onClick={() => void state.gridApplyRequested()}>Применить</Button>
         </Stack>
       )}
@@ -386,14 +539,17 @@ function TableSetup() {
 }
 
 function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady: boolean }) {
-  const { toggle, rest, catalog, rollAttack, tokens } = useUnit({
+  const { toggle, rest, catalog, rollAttack, tokens, master, viewer } = useUnit({
     toggle: characterPlacementToggled,
     rest: restRequested,
     catalog: catalogNames,
     rollAttack: attackRolled,
     tokens: sceneTokens,
+    master: dm,
+    viewer: viewerId,
   })
   const sheet = props.sheet
+  const editable = master || sheet.userId === viewer
   const tokenId = tokens.find(token => token.characterId === sheet.id)?.id ?? null
   return (
     <Tabs defaultValue="overview" w="100%">
@@ -415,48 +571,56 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
           </Group>
           <Stack gap={4} w={360}>
             <HpBar current={sheet.hpCurrent} max={sheet.hpMax} temp={sheet.hpTemp} />
-            {tokenId && <HpAdjust tokenId={tokenId} />}
+            {editable && tokenId && <HpAdjust tokenId={tokenId} />}
           </Stack>
-          <Group gap="xs">
-            <Button size="xs" variant={props.onMap ? 'default' : 'light'} disabled={!props.sceneReady} onClick={() => toggle(sheet.id)}>
-              {props.onMap ? 'Убрать с карты' : 'На карту'}
-            </Button>
-            <PortraitUpload characterId={sheet.id} />
-          </Group>
+          {editable && (
+            <Group gap="xs">
+              <Button size="xs" variant={props.onMap ? 'default' : 'light'} disabled={!props.sceneReady} onClick={() => toggle(sheet.id)}>
+                {props.onMap ? 'Убрать с карты' : 'На карту'}
+              </Button>
+              <PortraitUpload characterId={sheet.id} />
+            </Group>
+          )}
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="checks" pt="sm">
         <Stack gap="sm" align="flex-start">
           <AbilityScores abilities={sheet.abilities} />
-          <SkillRolls sheet={sheet} />
+          {editable && <SkillRolls sheet={sheet} />}
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="attacks" pt="sm">
         <Stack gap="sm" align="flex-start">
           <Group align="flex-start" gap="sm">
             {sheet.attacks.map(attack => (
-              <HeroAttack key={attack.id} attack={attack} exhaustion={sheet.exhaustion} onRoll={rollAttack} />
+              <HeroAttack key={attack.id} attack={attack} exhaustion={sheet.exhaustion} canRoll={editable} onRoll={rollAttack} />
             ))}
           </Group>
           <SlotPips slots={sheet.slots} />
-          <Accordion variant="contained" maw={520}>
-            <Accordion.Item value="kit">
-              <Accordion.Control>Умения и заклинания</Accordion.Control>
-              <Accordion.Panel>
-                <ClassKit sheet={sheet} />
-              </Accordion.Panel>
-            </Accordion.Item>
-          </Accordion>
+          {editable && (
+            <Accordion variant="contained" maw={520}>
+              <Accordion.Item value="kit">
+                <Accordion.Control>Умения и заклинания</Accordion.Control>
+                <Accordion.Panel>
+                  <ClassKit sheet={sheet} />
+                </Accordion.Panel>
+              </Accordion.Item>
+            </Accordion>
+          )}
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="gear" pt="sm">
         <Stack gap="sm" align="flex-start">
-          <GearList sheet={sheet} />
-          <SheetTrackers sheet={sheet} />
-          <Group gap="xs">
-            <Button size="xs" variant="light" onClick={() => rest({ characterId: sheet.id, kind: 'short' })}>Короткий отдых</Button>
-            <Button size="xs" variant="default" onClick={() => rest({ characterId: sheet.id, kind: 'long' })}>Длинный отдых</Button>
-          </Group>
+          {editable
+            ? <GearList sheet={sheet} />
+            : sheet.inventory.map(item => <Text key={item.id} size="sm">{item.name}</Text>)}
+          {editable && <SheetTrackers sheet={sheet} />}
+          {editable && (
+            <Group gap="xs">
+              <Button size="xs" variant="light" onClick={() => rest({ characterId: sheet.id, kind: 'short' })}>Короткий отдых</Button>
+              <Button size="xs" variant="default" onClick={() => rest({ characterId: sheet.id, kind: 'long' })}>Длинный отдых</Button>
+            </Group>
+          )}
         </Stack>
       </Tabs.Panel>
     </Tabs>
@@ -466,6 +630,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
 function HeroAttack(props: {
   attack: AttackDef
   exhaustion: number
+  canRoll: boolean
   onRoll: (roll: { attack: AttackDef, kind: 'attack' | 'save', exhaustion: number }) => void
 }) {
   const save = /сл\s*\d+/i.test(props.attack.damageType)
@@ -474,9 +639,11 @@ function HeroAttack(props: {
     <Stack gap={4} w={260} align="flex-start">
       <Text size="sm" fw={600}>{props.attack.name}</Text>
       <Text size="xs" c="dimmed">{attackDetail(props.attack)}</Text>
-      <Button size="xs" variant="default" onClick={() => props.onRoll({ attack: props.attack, kind, exhaustion: props.exhaustion })}>
-        {save ? 'Спасбросок' : 'Бросок'}
-      </Button>
+      {props.canRoll && (
+        <Button size="xs" variant="default" onClick={() => props.onRoll({ attack: props.attack, kind, exhaustion: props.exhaustion })}>
+          {save ? 'Спасбросок' : 'Бросок'}
+        </Button>
+      )}
     </Stack>
   )
 }
@@ -633,6 +800,10 @@ function MonsterStat() {
   )
 }
 
+function percentLabel(value: number) {
+  return `${value}%`
+}
+
 function statLine(ac: number | null, hp: number | null, speed: number | null) {
   const parts = [
     ac == null ? '' : `КД ${ac}`,
@@ -680,7 +851,12 @@ function MapUpload() {
           choose(file)
       }}
     >
-      {buttonProps => <Button {...buttonProps} size="xs" variant="default">Загрузить карту</Button>}
+      {buttonProps => (
+        <Stack gap={4}>
+          <Button {...buttonProps} size="xs" variant="default">Загрузить карту</Button>
+          <Text size="xs" c="dimmed">Файл хранится как есть, до 4K. PNG, JPG, WebP.</Text>
+        </Stack>
+      )}
     </FileButton>
   )
 }
