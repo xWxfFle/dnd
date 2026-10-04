@@ -172,7 +172,17 @@ export function MapBoard(props: {
 
   function coverMap() {
     dropFogDrag()
-    props.onFogUpdated([{ id: crypto.randomUUID(), points: polygonOf({ x: 0, y: 0, w: columns, h: rows }) }])
+    const shift = gridShift(grid)
+    const pad = 0.01
+    props.onFogUpdated([{
+      id: crypto.randomUUID(),
+      points: polygonOf({
+        x: -shift.x / grid.cellSize - pad,
+        y: -shift.y / grid.cellSize - pad,
+        w: width / grid.cellSize + pad * 2,
+        h: height / grid.cellSize + pad * 2,
+      }),
+    }])
   }
 
   function selectTool(next: Tool) {
@@ -252,7 +262,7 @@ export function MapBoard(props: {
   function onStageDown(event: StagePointerEvent) {
     const button = event.evt.button
     if (button === 0 && tool === 'fog' && props.dm) {
-      event.evt.preventDefault()
+      // preventDefault на pointerdown гасит mouseup, и мазок не сохраняется.
       event.evt.stopPropagation()
       const point = readCell(event)
       if (!point)
@@ -273,27 +283,33 @@ export function MapBoard(props: {
         current.aim = aim
         setFogDrag({ anchor: current.anchor, aim })
       }
-      const finish = () => {
-        window.removeEventListener('mousemove', move)
-        window.removeEventListener('mouseup', finish)
-        fogUpRef.current = null
-        const current = fogDragRef.current
-        fogDragRef.current = null
-        setFogDrag(null)
-        if (!current)
-          return
-        const area = cellSpan(current.anchor, current.aim)
-        const next = cellCovered(props.scene.fog, current.anchor) ? cutFog(props.scene.fog, area) : paintFog(props.scene.fog, area)
-        props.onFogUpdated(next)
-      }
-      const detach = () => {
-        window.removeEventListener('mousemove', move)
-        window.removeEventListener('mouseup', finish)
+      const gesture = {
+        detach() {
+          window.removeEventListener('pointermove', move)
+          window.removeEventListener('pointerup', gesture.finish)
+          window.removeEventListener('pointercancel', gesture.drop)
+        },
+        drop() {
+          gesture.detach()
+          fogUpRef.current = null
+          fogDragRef.current = null
+          setFogDrag(null)
+        },
+        finish() {
+          const current = fogDragRef.current
+          gesture.drop()
+          if (!current)
+            return
+          const area = cellSpan(current.anchor, current.aim)
+          const next = cellCovered(props.scene.fog, current.anchor) ? cutFog(props.scene.fog, area) : paintFog(props.scene.fog, area)
+          props.onFogUpdated(next)
+        },
       }
       fogUpRef.current?.()
-      fogUpRef.current = detach
-      window.addEventListener('mousemove', move)
-      window.addEventListener('mouseup', finish)
+      fogUpRef.current = gesture.detach
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', gesture.finish)
+      window.addEventListener('pointercancel', gesture.drop)
       return
     }
     const background = button === 1 || (button === 0 && tool === 'move' && event.target.name() === 'board')
@@ -394,7 +410,7 @@ export function MapBoard(props: {
                   />
                 )}
                 <GridLines grid={grid} />
-                <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} />
+                <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} width={width} height={height} />
                 <CellMarks cells={template} grid={grid} fill={tool === 'ruler' ? 'rgba(143,208,255,0.35)' : 'rgba(212,93,93,0.35)'} />
                 {fogSpan && (
                   <CellMarks
@@ -642,19 +658,38 @@ function GridLines(props: { grid: ReturnType<typeof readBoardGrid> }) {
   )
 }
 
-function FogLayer(props: { fog: SceneDto['fog'], grid: ReturnType<typeof readBoardGrid>, dm: boolean }) {
+function FogLayer(props: { fog: SceneDto['fog'], grid: ReturnType<typeof readBoardGrid>, dm: boolean, width: number, height: number }) {
   const fill = props.dm ? 'rgba(8,6,12,0.55)' : '#05040a'
+  const blanket = props.grid.kind === 'hex'
+    ? props.fog.filter(polygon => coversStage(props.grid, polygon.points, props.width, props.height))
+    : []
+  const partial = props.grid.kind === 'hex'
+    ? props.fog.filter(polygon => !coversStage(props.grid, polygon.points, props.width, props.height))
+    : props.fog
   if (props.grid.kind === 'hex') {
     const covered = []
     for (let row = 0; row < props.grid.rows; row += 1) {
       for (let col = 0; col < props.grid.columns; col += 1) {
-        if (cellCovered(props.fog, { x: col, y: row }))
+        if (cellCovered(partial, { x: col, y: row }))
           covered.push({ x: col, y: row })
       }
     }
-    return <CellMarks cells={covered} grid={props.grid} fill={fill} />
+    return (
+      <>
+        {blanket.map(polygon => (
+          <Line
+            key={polygon.id}
+            points={cellSpaceToPixels(props.grid, polygon.points)}
+            closed
+            fill={fill}
+            listening={false}
+          />
+        ))}
+        <CellMarks cells={covered} grid={props.grid} fill={fill} />
+      </>
+    )
   }
-  return props.fog.map(polygon => (
+  return partial.map(polygon => (
     <Line
       key={polygon.id}
       points={cellSpaceToPixels(props.grid, polygon.points)}
@@ -710,6 +745,23 @@ function cellSpan(start: CellPoint, end: CellPoint): FogRect {
   const x = Math.min(start.x, end.x)
   const y = Math.min(start.y, end.y)
   return { x, y, w: Math.abs(start.x - end.x) + 1, h: Math.abs(start.y - end.y) + 1 }
+}
+
+function coversStage(grid: ReturnType<typeof readBoardGrid>, points: number[], width: number, height: number) {
+  const pixels = cellSpaceToPixels(grid, points)
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (let index = 0; index < pixels.length; index += 2) {
+    const x = pixels[index] ?? 0
+    const y = pixels[index + 1] ?? 0
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x)
+    maxY = Math.max(maxY, y)
+  }
+  return minX <= 0.5 && minY <= 0.5 && maxX >= width - 0.5 && maxY >= height - 0.5
 }
 
 function polygonOf(rect: FogRect) {
