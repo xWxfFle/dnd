@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 function Get-LanIPv4 {
   Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
