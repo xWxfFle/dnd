@@ -249,14 +249,28 @@ export function MapBoard(props: {
     setZoom(fitZoom(scrollerRef.current, width, height))
   }
 
+  function readCellFromClient(clientX: number, clientY: number) {
+    const canvas = scrollerRef.current?.querySelector('canvas')
+    if (!canvas)
+      return null
+    const box = canvas.getBoundingClientRect()
+    if (box.width <= 0 || box.height <= 0)
+      return null
+    return cellOf(
+      (clientX - box.left) / box.width * width,
+      (clientY - box.top) / box.height * height,
+    )
+  }
+
   function readCell(event: StagePointerEvent) {
+    const fromClient = readCellFromClient(event.evt.clientX, event.evt.clientY)
+    if (fromClient)
+      return fromClient
     const stage = event.target.getStage()
     const pointer = stage?.getPointerPosition()
     if (!pointer)
       return null
-    // Stage scaleX/scaleY: pointer в пикселях canvas, клеткам нужны логические координаты.
-    const scale = zoomRef.current || 1
-    return cellOf(pointer.x / scale, pointer.y / scale)
+    return cellOf(pointer.x, pointer.y)
   }
 
   function onStageMove(event: StagePointerEvent) {
@@ -318,14 +332,10 @@ export function MapBoard(props: {
       const drag = { anchor: point, aim: point }
       fogDragRef.current = drag
       setFogDrag(drag)
-      const stage = event.target.getStage()
-      const move = (next: MouseEvent) => {
-        stage?.setPointersPositions(next)
-        const pointer = stage?.getPointerPosition()
-        if (!pointer)
+      const move = (next: PointerEvent) => {
+        const aim = readCellFromClient(next.clientX, next.clientY)
+        if (!aim)
           return
-        const scale = zoomRef.current || 1
-        const aim = cellOf(pointer.x / scale, pointer.y / scale)
         const current = fogDragRef.current
         if (!current || sameCell(current.aim, aim))
           return
@@ -334,9 +344,9 @@ export function MapBoard(props: {
       }
       const gesture = {
         detach() {
-          window.removeEventListener('pointermove', move)
-          window.removeEventListener('pointerup', gesture.finish)
-          window.removeEventListener('pointercancel', gesture.drop)
+          window.removeEventListener('pointermove', move, true)
+          window.removeEventListener('pointerup', gesture.finish, true)
+          window.removeEventListener('pointercancel', gesture.drop, true)
         },
         drop() {
           gesture.detach()
@@ -356,9 +366,9 @@ export function MapBoard(props: {
       }
       fogUpRef.current?.()
       fogUpRef.current = gesture.detach
-      window.addEventListener('pointermove', move)
-      window.addEventListener('pointerup', gesture.finish)
-      window.addEventListener('pointercancel', gesture.drop)
+      window.addEventListener('pointermove', move, true)
+      window.addEventListener('pointerup', gesture.finish, true)
+      window.addEventListener('pointercancel', gesture.drop, true)
       return
     }
     const handPan = button === 0 && tool === 'move' && !fromToken(event.target)
@@ -445,70 +455,72 @@ export function MapBoard(props: {
         onContextMenu={event => event.preventDefault()}
         style={{ cursor: boardCursor(panning, tool, spaceDown), flex: 1, minHeight: 0, minWidth: 0, overflow: 'auto', width: '100%' }}
       >
-        <div style={{ height: height * zoom, imageRendering: grid.smoothing === 'nearest' ? 'pixelated' : 'auto', width: width * zoom }}>
-          <Stage
-            width={width * zoom}
-            height={height * zoom}
-            scaleX={zoom}
-            scaleY={zoom}
-            style={{ cursor: boardCursor(panning, tool, spaceDown) }}
-            onClick={onStageClick}
-            onMouseDown={onStageDown}
-            onMouseMove={onStageMove}
-          >
-            <Layer imageSmoothingEnabled={grid.smoothing !== 'nearest'}>
-              <Rect name="board" width={width} height={height} fill="#1b1724" />
-              {props.scene.imageUrl && image && mapPixels && (
-                <MapImage
-                  image={image}
-                  x={picture.x}
-                  y={picture.y}
-                  width={mapPixels.width}
-                  height={mapPixels.height}
-                  listening={false}
-                />
-              )}
-              <GridLines grid={grid} />
-              <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} />
-            </Layer>
-            <Layer>
-              <CellMarks cells={template} grid={grid} fill={tool === 'ruler' ? 'rgba(143,208,255,0.35)' : 'rgba(212,93,93,0.35)'} />
-              {fogSpan && (
-                <CellMarks
-                  cells={cellsInSpan(fogSpan)}
-                  grid={grid}
-                  fill={fogErase ? 'rgba(143,208,255,0.35)' : 'rgba(240,213,140,0.45)'}
-                />
-              )}
-              {tool === 'fog' && hover && !fogDrag && (
-                <Line points={cellOutline(grid, hover.x, hover.y)} closed stroke="#f0d58c" strokeWidth={2} listening={false} />
-              )}
-              {anchor && hover && aimsWithPointer(tool) && !sameCell(anchor, hover) && (
-                <Line
-                  points={lineBetween(grid, anchor, hover)}
-                  stroke="#f4efe4"
-                  dash={[6, 4]}
-                  listening={false}
-                />
-              )}
-              {anchor && tool !== 'move' && tool !== 'fog' && (
-                <Line points={cellOutline(grid, anchor.x, anchor.y)} closed stroke="#f4efe4" strokeWidth={2} listening={false} />
-              )}
-              {props.tokens.map(token => (
-                <TokenPiece
-                  key={token.id}
-                  token={token}
-                  grid={grid}
-                  imageUrl={token.obscured ? null : token.imageUrl}
-                  draggable={tool === 'move' && !spaceDown}
-                  onDragged={() => {
-                    draggedRef.current = true
-                  }}
-                  onMoved={props.onTokenMoved}
-                />
-              ))}
-            </Layer>
-          </Stage>
+        <div style={{ height: height * zoom, width: width * zoom }}>
+          <div style={{ height, imageRendering: grid.smoothing === 'nearest' ? 'pixelated' : 'auto', transform: `scale(${zoom})`, transformOrigin: '0 0', width }}>
+            <Stage
+              width={width}
+              height={height}
+              style={{ cursor: boardCursor(panning, tool, spaceDown) }}
+              onClick={onStageClick}
+              onMouseDown={onStageDown}
+              onMouseMove={onStageMove}
+            >
+              <Layer imageSmoothingEnabled={grid.smoothing !== 'nearest'}>
+                <Rect name="board" width={width} height={height} fill="#1b1724" />
+                {props.scene.imageUrl && image && mapPixels && (
+                  <MapImage
+                    image={image}
+                    x={picture.x}
+                    y={picture.y}
+                    width={mapPixels.width}
+                    height={mapPixels.height}
+                    listening={false}
+                  />
+                )}
+                <GridLines grid={grid} />
+                <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} />
+              </Layer>
+              <Layer>
+                <CellMarks cells={template} grid={grid} fill={tool === 'ruler' ? 'rgba(143,208,255,0.35)' : 'rgba(212,93,93,0.35)'} />
+                {fogSpan && (
+                  <CellMarks
+                    cells={cellsInSpan(fogSpan)}
+                    grid={grid}
+                    fill={fogErase ? 'rgba(143,208,255,0.35)' : 'rgba(240,213,140,0.45)'}
+                  />
+                )}
+                {tool === 'fog' && hover && !fogDrag && (
+                  <Line points={cellOutline(grid, hover.x, hover.y)} closed stroke="#f0d58c" strokeWidth={2} listening={false} />
+                )}
+                {anchor && hover && aimsWithPointer(tool) && !sameCell(anchor, hover) && (
+                  <Line
+                    points={lineBetween(grid, anchor, hover)}
+                    stroke="#f4efe4"
+                    dash={[6, 4]}
+                    listening={false}
+                  />
+                )}
+                {anchor && tool !== 'move' && tool !== 'fog' && (
+                  <Line points={cellOutline(grid, anchor.x, anchor.y)} closed stroke="#f4efe4" strokeWidth={2} listening={false} />
+                )}
+                {props.tokens.map(token => (
+                  <TokenPiece
+                    key={token.id}
+                    token={token}
+                    grid={grid}
+                    boardWidth={width}
+                    boardHeight={height}
+                    imageUrl={token.obscured ? null : token.imageUrl}
+                    draggable={tool === 'move' && !spaceDown}
+                    onDragged={() => {
+                      draggedRef.current = true
+                    }}
+                    onMoved={props.onTokenMoved}
+                  />
+                ))}
+              </Layer>
+            </Stage>
+          </div>
         </div>
       </div>
     </div>
@@ -518,12 +530,13 @@ export function MapBoard(props: {
 function TokenPiece(props: {
   token: TokenDto
   grid: ReturnType<typeof readBoardGrid>
+  boardWidth: number
+  boardHeight: number
   imageUrl: string | null
   draggable: boolean
   onDragged: () => void
   onMoved: (move: { tokenId: string, x: number, y: number }) => void
 }) {
-  const { width, height } = boardSize(props.grid)
   const center = cellCenter(props.grid, props.token.x, props.token.y)
   const radius = Math.max(props.token.size, 1) * props.grid.cellSize / 2
   const labelWidth = props.grid.cellSize * 3
@@ -538,10 +551,14 @@ function TokenPiece(props: {
       opacity={props.token.hidden ? 0.4 : 1}
       draggable={props.draggable}
       listening={props.draggable}
-      dragBoundFunc={pos => ({
-        x: clamp(pos.x, radius, width - radius),
-        y: clamp(pos.y, radius, height - radius),
-      })}
+      dragBoundFunc={function (pos) {
+        const scaleX = this.getStage()?.scaleX() || 1
+        const scaleY = this.getStage()?.scaleY() || 1
+        return {
+          x: clamp(pos.x, radius * scaleX, Math.max(radius * scaleX, (props.boardWidth - radius) * scaleX)),
+          y: clamp(pos.y, radius * scaleY, Math.max(radius * scaleY, (props.boardHeight - radius) * scaleY)),
+        }
+      }}
       onDragEnd={(event) => {
         props.onDragged()
         const next = cellAt(props.grid, event.target.x(), event.target.y())
