@@ -185,7 +185,7 @@ export function bootClient() {
       },
     })
     if (token.value && !currentUser.value)
-      void meQuery()
+      void meQuery(undefined)
     reaction({
       on: joinRoute.opened,
       run() {
