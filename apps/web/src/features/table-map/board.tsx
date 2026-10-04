@@ -359,6 +359,7 @@ export function MapBoard(props: {
               <Button size="xs" variant={tool === 'fog' ? 'filled' : 'default'} onClick={() => selectTool('fog')}>Туман</Button>
               <Button size="xs" variant="light" onClick={coverMap}>Туман на всю карту</Button>
               <Button size="xs" variant="default" onClick={resetFog}>Сбросить туман</Button>
+              <Text size="xs" c="dimmed">{`На карте: ${props.scene.fog.length}`}</Text>
             </>
           )}
           <ActionIcon size="sm" variant="default" aria-label="Мельче" onClick={zoomOut}>
@@ -410,7 +411,11 @@ export function MapBoard(props: {
                   />
                 )}
                 <GridLines grid={grid} />
-                <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} width={width} height={height} />
+              </Layer>
+              <Layer listening={false}>
+                <FogLayer fog={props.scene.fog} grid={grid} dm={props.dm} />
+              </Layer>
+              <Layer>
                 <CellMarks cells={template} grid={grid} fill={tool === 'ruler' ? 'rgba(143,208,255,0.35)' : 'rgba(212,93,93,0.35)'} />
                 {fogSpan && (
                   <CellMarks
@@ -658,46 +663,53 @@ function GridLines(props: { grid: ReturnType<typeof readBoardGrid> }) {
   )
 }
 
-function FogLayer(props: { fog: SceneDto['fog'], grid: ReturnType<typeof readBoardGrid>, dm: boolean, width: number, height: number }) {
-  const fill = props.dm ? 'rgba(8,6,12,0.55)' : '#05040a'
-  const blanket = props.grid.kind === 'hex'
-    ? props.fog.filter(polygon => coversStage(props.grid, polygon.points, props.width, props.height))
-    : []
-  const partial = props.grid.kind === 'hex'
-    ? props.fog.filter(polygon => !coversStage(props.grid, polygon.points, props.width, props.height))
-    : props.fog
-  if (props.grid.kind === 'hex') {
-    const covered = []
-    for (let row = 0; row < props.grid.rows; row += 1) {
-      for (let col = 0; col < props.grid.columns; col += 1) {
-        if (cellCovered(partial, { x: col, y: row }))
-          covered.push({ x: col, y: row })
-      }
-    }
+function FogLayer(props: { fog: SceneDto['fog'], grid: ReturnType<typeof readBoardGrid>, dm: boolean }) {
+  const fill = props.dm ? 'rgba(0,0,0,0.72)' : '#05040a'
+  if (props.grid.kind === 'hex')
+    return <CellMarks cells={coveredCells(props.fog, props.grid)} grid={props.grid} fill={fill} />
+  return (
+    <ShapeGroup listening={false}>
+      {props.fog.map(polygon => (
+        <FogPatch key={polygon.id} points={polygon.points} grid={props.grid} fill={fill} />
+      ))}
+    </ShapeGroup>
+  )
+}
+
+function FogPatch(props: { points: number[], grid: ReturnType<typeof readBoardGrid>, fill: string }) {
+  const rect = rectOf(props.points)
+  if (rect) {
+    const shift = gridShift(props.grid)
     return (
-      <>
-        {blanket.map(polygon => (
-          <Line
-            key={polygon.id}
-            points={cellSpaceToPixels(props.grid, polygon.points)}
-            closed
-            fill={fill}
-            listening={false}
-          />
-        ))}
-        <CellMarks cells={covered} grid={props.grid} fill={fill} />
-      </>
+      <Rect
+        x={shift.x + rect.x * props.grid.cellSize}
+        y={shift.y + rect.y * props.grid.cellSize}
+        width={rect.w * props.grid.cellSize}
+        height={rect.h * props.grid.cellSize}
+        fill={props.fill}
+        listening={false}
+      />
     )
   }
-  return partial.map(polygon => (
+  return (
     <Line
-      key={polygon.id}
-      points={cellSpaceToPixels(props.grid, polygon.points)}
+      points={cellSpaceToPixels(props.grid, props.points)}
       closed
-      fill={fill}
+      fill={props.fill}
       listening={false}
     />
-  ))
+  )
+}
+
+function coveredCells(fog: SceneDto['fog'], grid: ReturnType<typeof readBoardGrid>) {
+  const covered = []
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let col = 0; col < grid.columns; col += 1) {
+      if (cellCovered(fog, { x: col, y: row }))
+        covered.push({ x: col, y: row })
+    }
+  }
+  return covered
 }
 
 function cellsInSpan(span: FogRect) {
@@ -745,23 +757,6 @@ function cellSpan(start: CellPoint, end: CellPoint): FogRect {
   const x = Math.min(start.x, end.x)
   const y = Math.min(start.y, end.y)
   return { x, y, w: Math.abs(start.x - end.x) + 1, h: Math.abs(start.y - end.y) + 1 }
-}
-
-function coversStage(grid: ReturnType<typeof readBoardGrid>, points: number[], width: number, height: number) {
-  const pixels = cellSpaceToPixels(grid, points)
-  let minX = Number.POSITIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  for (let index = 0; index < pixels.length; index += 2) {
-    const x = pixels[index] ?? 0
-    const y = pixels[index + 1] ?? 0
-    minX = Math.min(minX, x)
-    minY = Math.min(minY, y)
-    maxX = Math.max(maxX, x)
-    maxY = Math.max(maxY, y)
-  }
-  return minX <= 0.5 && minY <= 0.5 && maxX >= width - 0.5 && maxY >= height - 0.5
 }
 
 function polygonOf(rect: FogRect) {
