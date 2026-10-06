@@ -77,6 +77,10 @@ export const characters = pgTable('characters', {
   notes: text('notes').notNull().default(''),
   avatarPath: text('avatar_path'),
   kind: text('kind').notNull().default('hero'),
+  classResources: jsonb('class_resources').notNull().default([]),
+  featureToggles: jsonb('feature_toggles').notNull().default([]),
+  featIds: jsonb('feat_ids').notNull().default([]),
+  pendingChoice: text('pending_choice'),
 })
 
 export const creaturePresets = pgTable('creature_presets', {

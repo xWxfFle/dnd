@@ -8,7 +8,7 @@ export type CampaignRole = 'dm' | 'player'
 export type Ability = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 export type SaveOverrides = Partial<Record<Ability, number>>
 export type DiceMode = 'normal' | 'advantage' | 'disadvantage' | 'crit'
-export type SrdKind = 'class' | 'species' | 'background' | 'feat' | 'spell' | 'monster' | 'item'
+export type SrdKind = 'class' | 'subclass' | 'species' | 'background' | 'feat' | 'spell' | 'monster' | 'item'
 export type RestKind = 'short' | 'long'
 
 export interface Abilities {
@@ -50,7 +50,26 @@ export interface ClassFeature {
   name: string
   text: string
   formula?: string
+  level: number
   subclass: boolean
+  subclassId?: string
+}
+
+export type ResourceRecover = 'short' | 'long' | 'shortOne'
+export type PendingChoice = 'asi' | 'subclass' | 'feat'
+
+export interface ClassResource {
+  id: string
+  name: string
+  max: number
+  spent: number
+  recover: ResourceRecover
+}
+
+export interface ClassTable {
+  id: string
+  name: string
+  values: Record<string, string>
 }
 
 export interface DeathSaves {

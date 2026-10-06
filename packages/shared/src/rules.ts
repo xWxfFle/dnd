@@ -373,10 +373,14 @@ export function armorClass(options: {
   base?: number
   dexCap?: number | null
   shield?: number
+  unarmored?: 'con' | 'wis' | null
 }) {
   const dex = abilityModifier(options.abilities.dex)
   const capped = options.dexCap == null ? dex : Math.min(dex, options.dexCap)
-  return (options.base ?? 10) + capped + (options.shield ?? 0)
+  const natural = options.unarmored && options.base == null
+    ? 10 + dex + abilityModifier(options.abilities[options.unarmored])
+    : (options.base ?? 10) + capped
+  return natural + (options.shield ?? 0)
 }
 
 const itemKindByKey = {
@@ -407,6 +411,7 @@ export function equipmentSheet(input: {
   inventory: InventoryItem[]
   attacks: AttackDef[]
   gearOf: (itemId: string) => { name: string, stats: GearStats } | null
+  unarmored?: 'con' | 'wis' | null
 }) {
   const inventory = settleEquipped(input.inventory.map(item => alignGear(item, resolvedGear(item, input.gearOf))))
   const armor = inventory.find(item => item.kind === 'armor' && item.equipped)
@@ -414,9 +419,10 @@ export function equipmentSheet(input: {
   const shield = inventory.some(item => item.kind === 'shield' && item.equipped)
   const ac = armorClass({
     abilities: input.abilities,
-    base: armorStats?.kind === 'armor' ? armorStats.base : 10,
+    base: armorStats?.kind === 'armor' ? armorStats.base : undefined,
     dexCap: armorStats?.kind === 'armor' ? armorStats.dexCap : null,
     shield: shield ? 2 : 0,
+    unarmored: armorStats?.kind === 'armor' ? null : input.unarmored ?? null,
   })
   const weapons = inventory.flatMap((item) => {
     if (item.kind !== 'weapon' || !item.equipped)

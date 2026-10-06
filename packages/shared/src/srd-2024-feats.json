@@ -1,0 +1,104 @@
+[
+  {
+    "id": "alert",
+    "name": "Бдительность",
+    "category": "origin",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "grappler",
+    "name": "Борец",
+    "category": "origin",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "boon-of-combat-prowess",
+    "name": "Дар боевого мастерства",
+    "category": "epic-boon",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "boon-of-truesight",
+    "name": "Дар истинного зрения",
+    "category": "epic-boon",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "boon-of-irresistible-offense",
+    "name": "Дар неотразимого натиска",
+    "category": "epic-boon",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "boon-of-the-night-spirit",
+    "name": "Дар ночного духа",
+    "category": "epic-boon",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "boon-of-spell-recall",
+    "name": "Дар припоминания заклинаний",
+    "category": "epic-boon",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "boon-of-dimensional-travel",
+    "name": "Дар пространственного путешествия",
+    "category": "epic-boon",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "boon-of-fate",
+    "name": "Дар судьбы",
+    "category": "epic-boon",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "defense",
+    "name": "Оборона",
+    "category": "fighting-style",
+    "text": ""
+  },
+  {
+    "id": "magic-initiate",
+    "name": "Посвящённый в магию",
+    "category": "origin",
+    "text": "You gain the following benefits."
+  },
+  {
+    "id": "savage-attacker",
+    "name": "Свирепый атакующий",
+    "category": "origin",
+    "text": ""
+  },
+  {
+    "id": "great-weapon-fighting",
+    "name": "Сражение большим оружием",
+    "category": "fighting-style",
+    "text": ""
+  },
+  {
+    "id": "two-weapon-fighting",
+    "name": "Сражение двумя оружиями",
+    "category": "fighting-style",
+    "text": ""
+  },
+  {
+    "id": "archery",
+    "name": "Стрельба",
+    "category": "fighting-style",
+    "text": ""
+  },
+  {
+    "id": "ability-score-improvement",
+    "name": "Увеличение характеристик",
+    "category": "asi",
+    "text": ""
+  },
+  {
+    "id": "skilled",
+    "name": "Умелец",
+    "category": "origin",
+    "text": ""
+  }
+]

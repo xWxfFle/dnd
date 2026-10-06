@@ -1,4 +1,4 @@
-import type { Skill } from '@dnd/shared'
+import type { Skill, SrdEntryDto } from '@dnd/shared'
 import { abilities, abilityLabel, skillChoiceForOrigin, skillLabel, skills } from '@dnd/shared'
 import { Button, Checkbox, Group, NumberInput, Select, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useField, useWizard } from '@virentia/forms-react'
@@ -50,12 +50,38 @@ export function CharacterPage() {
       </Group>
       <Text c="dimmed">{stepTitle[current as keyof typeof stepTitle] ?? current}</Text>
       {current === 'class' && (
-        <Select label="Класс" data={options('class')} value={classId.value} onChange={value => value && void classId.fill(value)} />
+        <Stack>
+          <Select
+            label="Класс"
+            data={options('class')}
+            value={classId.value}
+            onChange={(value) => {
+              if (!value)
+                return
+              void classId.fill(value)
+              const granted = skillChoiceForOrigin(value, backgroundId.value)?.granted ?? []
+              void skillPick.fill(granted)
+            }}
+          />
+          <ClassPreview classId={classId.value} catalog={catalog} />
+        </Stack>
       )}
       {current === 'origin' && (
         <Stack>
           <Select label="Вид" data={options('species')} value={speciesId.value} onChange={value => value && void speciesId.fill(value)} />
-          <Select label="Предыстория" data={options('background')} value={backgroundId.value} onChange={value => value && void backgroundId.fill(value)} />
+          <Select
+            label="Предыстория"
+            data={options('background')}
+            value={backgroundId.value}
+            onChange={(value) => {
+              if (!value)
+                return
+              void backgroundId.fill(value)
+              const granted = skillChoiceForOrigin(classId.value, value)?.granted ?? []
+              void skillPick.fill(granted)
+            }}
+          />
+          <OriginPreview backgroundId={backgroundId.value} catalog={catalog} />
         </Stack>
       )}
       {current === 'abilities' && (
@@ -76,7 +102,9 @@ export function CharacterPage() {
           backgroundId={backgroundId.value}
           picked={skillPick.value}
           error={skillPick.errors}
-          onChange={value => void skillPick.fill(value)}
+          onChange={(value) => {
+            void skillPick.fill(value).then(() => skillPick.validate())
+          }}
         />
       )}
       {current === 'name' && (
@@ -92,12 +120,56 @@ export function CharacterPage() {
   )
 }
 
-function skillHint(skill: string, granted: Set<string>, offered: Set<string>) {
+function ClassPreview(props: { classId: string, catalog: SrdEntryDto[] }) {
+  const entry = props.catalog.find(item => item.id === props.classId)
+  if (!entry)
+    return null
+  const hitDie = typeof entry.body.hitDie === 'string' ? entry.body.hitDie : ''
+  const saves = Array.isArray(entry.body.saves)
+    ? entry.body.saves.filter((item): item is keyof typeof abilityLabel => typeof item === 'string' && item in abilityLabel).map(item => abilityLabel[item])
+    : []
+  const skillChoices = Number(entry.body.skillChoices ?? 0)
+  const classKey = props.classId.replace(/^class-/, '')
+  const subclasses = props.catalog
+    .filter(item => item.kind === 'subclass' && item.body.classId === classKey)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  const subclassNames = subclasses.map(item => item.name).join(', ') || '—'
+  return (
+    <Text size="sm" c="dimmed">
+      {`Кость хитов ${hitDie}. Спасброски: ${saves.join(', ') || '—'}. Навыков на выбор: ${skillChoices}. Подкласс с 3 уровня: ${subclassNames}.`}
+    </Text>
+  )
+}
+
+function OriginPreview(props: { backgroundId: string, catalog: SrdEntryDto[] }) {
+  const entry = props.catalog.find(item => item.id === props.backgroundId)
+  if (!entry)
+    return null
+  const featId = typeof entry.body.originFeatId === 'string' ? entry.body.originFeatId : ''
+  const feat = props.catalog.find(item => item.id === featId)
+  const granted = Array.isArray(entry.body.skills)
+    ? entry.body.skills.filter((item): item is Skill => typeof item === 'string' && item in skillLabel).map(item => skillLabel[item])
+    : []
+  return (
+    <Text size="sm" c="dimmed">
+      {`Навыки фона: ${granted.join(', ') || '—'}. Черта происхождения: ${feat?.name ?? '—'}.`}
+    </Text>
+  )
+}
+
+const skillSourceLabel = {
+  background: 'предыстория',
+  class: 'список класса',
+  other: 'вне списка класса',
+} as const
+
+function skillSource(skill: Skill, granted: Set<string>, suggested: Set<string>) {
   if (granted.has(skill))
-    return ' · предыстория'
-  if (offered.has(skill))
-    return ' · класс'
-  return ''
+    return 'background' as const
+  if (suggested.has(skill))
+    return 'class' as const
+  return 'other' as const
 }
 
 function SkillChoices(props: {
@@ -108,28 +180,43 @@ function SkillChoices(props: {
   onChange: (skills: Skill[]) => void
 }) {
   const choice = skillChoiceForOrigin(props.classId, props.backgroundId)
-  const granted = new Set<string>(choice?.granted ?? [])
-  const offered = new Set<string>(choice?.skills ?? [])
+  const granted = choice?.granted ?? []
+  const grantedSet = new Set<string>(granted)
+  const suggestedSet = new Set<string>(choice?.suggested ?? [])
   const choices = choice?.skillChoices ?? 0
+  const pickedClass = props.picked.filter(skill => !grantedSet.has(skill))
+  const atMax = pickedClass.length >= choices
   const toggle = (skill: Skill) => {
-    if (props.picked.includes(skill)) {
-      props.onChange(props.picked.filter(item => item !== skill))
+    if (grantedSet.has(skill))
+      return
+    if (pickedClass.includes(skill)) {
+      props.onChange([...granted, ...pickedClass.filter(item => item !== skill)])
       return
     }
-    props.onChange([...props.picked, skill])
+    if (atMax)
+      return
+    props.onChange([...granted, ...pickedClass, skill])
   }
   return (
     <Stack gap="xs">
-      <Text size="sm">{`Любые навыки, сейчас ${props.picked.length}. Класс обычно даёт ${choices} — мастер подскажет.`}</Text>
+      <Text size="sm">
+        {`Фон даёт ${granted.length}, класс — ещё ${choices} (${pickedClass.length}/${choices}). Брать можно любой навык, список класса отмечен как подсказка.`}
+      </Text>
       {props.error && <Text size="sm" c="red">{props.error}</Text>}
-      {skills.map(skill => (
-        <Checkbox
-          key={skill}
-          label={`${skillLabel[skill]}${skillHint(skill, granted, offered)}`}
-          checked={props.picked.includes(skill)}
-          onChange={() => toggle(skill)}
-        />
-      ))}
+      {skills.map((skill) => {
+        const source = skillSource(skill, grantedSet, suggestedSet)
+        const picked = source === 'background' || props.picked.includes(skill)
+        const locked = source === 'background' || (atMax && !pickedClass.includes(skill))
+        return (
+          <Checkbox
+            key={skill}
+            label={`${skillLabel[skill]} · ${skillSourceLabel[source]}`}
+            checked={picked}
+            disabled={locked}
+            onChange={() => toggle(skill)}
+          />
+        )
+      })}
     </Stack>
   )
 }

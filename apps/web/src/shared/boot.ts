@@ -1,4 +1,5 @@
 import type { Skill } from '@dnd/shared'
+import { acceptSkillChoice, skillChoiceForOrigin } from '@dnd/shared'
 import { reaction, scoped } from '@virentia/core'
 import { createField, createForm, createWizardForm, readStoreSnapshot, step } from '@virentia/forms'
 
@@ -46,12 +47,17 @@ const abilityField = () => createField(10, { validate: zodFieldValidator(z.numbe
 const classIdField = createField('class-fighter')
 const backgroundIdField = createField('background-soldier')
 
-const skillsField = createField<Skill[]>([], {
-  validate(value) {
+const skillsField = createField<Skill[]>(['athletics', 'intimidation'], {
+  validate(value, ctx) {
     if (new Set(value).size !== value.length)
       return 'Навыки без повторов'
+    const classId = ctx.read(classIdField.state)
+    const backgroundId = ctx.read(backgroundIdField.state)
+    if (!acceptSkillChoice(value, classId, backgroundId))
+      return `Навыков сверх предыстории должно быть ${skillChoiceForOrigin(classId, backgroundId)?.skillChoices ?? 0}`
     return null
   },
+  validationStrategies: ['change', 'submit'],
 })
 
 export const characterWizard = createWizardForm({
@@ -72,7 +78,7 @@ export const characterWizard = createWizardForm({
     step('class', { form: form.pick({ classId: true }) }),
     step('origin', { form: form.pick({ speciesId: true, backgroundId: true }) }),
     step('abilities', { form: form.pick({ str: true, dex: true, con: true, int: true, wis: true, cha: true }) }),
-    step('skills', { form: form.pick({ classId: true, skills: true }) }),
+    step('skills', { form: form.pick({ classId: true, backgroundId: true, skills: true }) }),
     step('name', { form: form.pick({ name: true }) }),
   ],
 })
@@ -132,6 +138,9 @@ export function bootClient() {
         const values = readStoreSnapshot(characterWizard.form.values)
         if (!campaignId)
           return
+        const skills = acceptSkillChoice(values.skills, values.classId, values.backgroundId)
+        if (!skills)
+          return
         void createCharacterMutation({
           campaignId,
           body: {
@@ -147,7 +156,7 @@ export function bootClient() {
               wis: values.wis,
               cha: values.cha,
             },
-            skillProficiencies: values.skills,
+            skillProficiencies: skills,
           },
         })
       },

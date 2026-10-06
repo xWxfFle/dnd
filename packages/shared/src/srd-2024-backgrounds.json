@@ -1,0 +1,58 @@
+[
+  {
+    "id": "sage",
+    "name": "Мудрец",
+    "originFeatId": "feat-magic-initiate",
+    "abilities": [
+      "con",
+      "int",
+      "wis"
+    ],
+    "skills": [
+      "arcana",
+      "history"
+    ]
+  },
+  {
+    "id": "acolyte",
+    "name": "Послушник",
+    "originFeatId": "feat-magic-initiate",
+    "abilities": [
+      "int",
+      "wis",
+      "cha"
+    ],
+    "skills": [
+      "insight",
+      "religion"
+    ]
+  },
+  {
+    "id": "criminal",
+    "name": "Преступник",
+    "originFeatId": "feat-alert",
+    "abilities": [
+      "dex",
+      "con",
+      "int"
+    ],
+    "skills": [
+      "sleight-of-hand",
+      "stealth"
+    ]
+  },
+  {
+    "id": "soldier",
+    "name": "Солдат",
+    "originFeatId": "feat-savage-attacker",
+    "abilities": [
+      "str",
+      "dex",
+      "con"
+    ],
+    "skills": [
+      "athletics",
+      "intimidation"
+    ]
+  }
+]

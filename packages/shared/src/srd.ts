@@ -1,260 +1,49 @@
-import type { ClassFeature, GearAbility, GearStats, Skill } from './types'
+import type { ClassFeature, ClassResource, ClassTable, GearAbility, GearStats, ResourceRecover, Skill } from './types'
+import backgroundRows from './srd-2024-backgrounds.json'
+import classRows from './srd-2024-classes.json'
+import featRows from './srd-2024-feats.json'
 import itemRows from './srd-2024-items.json'
 import monsterRows from './srd-2024-monsters.json'
 import spellRows from './srd-2024-spells.json'
+import subclassRows from './srd-2024-subclasses.json'
 import { skills } from './types'
 
 export interface SrdSeed {
   id: string
-  kind: 'class' | 'species' | 'background' | 'feat' | 'spell' | 'monster' | 'item'
+  kind: 'class' | 'subclass' | 'species' | 'background' | 'feat' | 'spell' | 'monster' | 'item'
   name: string
   body: Record<string, unknown>
 }
 
-const offered = (list: readonly Skill[]) => list
+export const srdCatalog: SrdSeed[] = []
 
-const skillOfferByDraft = {
-  barbarian: offered(['animal-handling', 'athletics', 'intimidation', 'nature', 'perception', 'survival']),
-  bard: offered(skills),
-  cleric: offered(['history', 'insight', 'medicine', 'persuasion', 'religion']),
-  druid: offered(['arcana', 'animal-handling', 'insight', 'medicine', 'nature', 'perception', 'religion', 'survival']),
-  fighter: offered(['acrobatics', 'animal-handling', 'athletics', 'history', 'insight', 'intimidation', 'perception', 'persuasion', 'survival']),
-  monk: offered(['acrobatics', 'athletics', 'history', 'insight', 'religion', 'stealth']),
-  paladin: offered(['athletics', 'insight', 'intimidation', 'medicine', 'persuasion', 'religion']),
-  ranger: offered(['animal-handling', 'athletics', 'insight', 'investigation', 'nature', 'perception', 'stealth', 'survival']),
-  rogue: offered(['acrobatics', 'athletics', 'deception', 'insight', 'intimidation', 'investigation', 'perception', 'performance', 'persuasion', 'sleight-of-hand', 'stealth']),
-  sorcerer: offered(['arcana', 'deception', 'insight', 'intimidation', 'persuasion', 'religion']),
-  warlock: offered(['arcana', 'deception', 'history', 'intimidation', 'investigation', 'nature', 'religion']),
-  wizard: offered(['arcana', 'history', 'insight', 'investigation', 'medicine', 'nature', 'religion']),
+const recoverByTable: Record<string, ResourceRecover> = {
+  'rages': 'shortOne',
+  'focus-points': 'short',
+  'monks-focus': 'short',
+  'sorcery-points': 'long',
+  'channel-divinity': 'short',
+  'wild-shape': 'short',
+  'wild-shape-uses': 'short',
+  'bardic-inspiration': 'long',
 }
 
-const skillChoicesByDraft = {
-  barbarian: 2,
-  bard: 3,
-  cleric: 2,
-  druid: 2,
-  fighter: 2,
-  monk: 2,
-  paladin: 2,
-  ranger: 3,
-  rogue: 4,
-  sorcerer: 2,
-  warlock: 2,
-  wizard: 2,
-} as const satisfies Record<keyof typeof skillOfferByDraft, number>
+const skipResource = /damage|die|bonus|mastery|cantrip|prepared|known|invocations|slot/
+
+export function srdById(id: string) {
+  return srdCatalog.find(entry => entry.id === id) ?? null
+}
 
 export function skillOfferForClass(classId: string) {
-  const draftId = classId.replace(/^class-/, '')
-  if (!Object.hasOwn(skillOfferByDraft, draftId))
+  const entry = srdById(classId)
+  if (!entry || entry.kind !== 'class')
     return null
-  const id = draftId as keyof typeof skillOfferByDraft
-  return {
-    skillChoices: skillChoicesByDraft[id],
-    skills: skillOfferByDraft[id],
-  }
+  const skillChoices = Number(entry.body.skillChoices ?? 0)
+  const list = Array.isArray(entry.body.skills) ? entry.body.skills.filter(isSkill) : [...skills]
+  if (skillChoices < 1)
+    return null
+  return { skillChoices, skills: list.length > 0 ? list : [...skills] }
 }
-
-interface ClassDraft {
-  id: keyof typeof skillOfferByDraft
-  name: string
-  hitDie: string
-  saves: string[]
-  casting: string | null
-  subclassName: string
-  weaponMastery: boolean
-  spellIds: string[]
-  features: ClassFeature[]
-}
-
-const classDrafts: ClassDraft[] = [
-  {
-    id: 'barbarian',
-    name: 'Варвар',
-    hitDie: 'd12',
-    saves: ['str', 'con'],
-    casting: null,
-    subclassName: 'Путь берсерка',
-    weaponMastery: true,
-    spellIds: [],
-    features: [
-      { id: 'rage', name: 'Ярость', text: 'Бонусное действие. Сопротивление дробящему, колющему и рубящему, +2 к урону атак Силы.', subclass: false },
-      { id: 'frenzy', name: 'Бешенство', text: 'Пока длится ярость, бонусным действием ещё одна рукопашная атака.', subclass: true },
-    ],
-  },
-  {
-    id: 'bard',
-    name: 'Бард',
-    hitDie: 'd8',
-    saves: ['dex', 'cha'],
-    casting: 'cha',
-    subclassName: 'Коллегия знаний',
-    weaponMastery: false,
-    spellIds: ['healing-word', 'thunderwave'],
-    features: [
-      { id: 'inspiration', name: 'Вдохновение барда', text: 'Бонусное действие. Союзник получает кость d6.', formula: '1d6', subclass: false },
-      { id: 'cutting-words', name: 'Острое словцо', text: 'Реакция. Вычтите кость вдохновения из броска врага.', formula: '1d6', subclass: true },
-    ],
-  },
-  {
-    id: 'cleric',
-    name: 'Жрец',
-    hitDie: 'd8',
-    saves: ['wis', 'cha'],
-    casting: 'wis',
-    subclassName: 'Домен жизни',
-    weaponMastery: false,
-    spellIds: ['sacred-flame', 'cure-wounds', 'guiding-bolt'],
-    features: [
-      { id: 'channel', name: 'Божественный канал', text: 'Изгнание нежити. Нежить рядом проходит спасбросок Мудрости.', subclass: false },
-      { id: 'preserve-life', name: 'Сохранение жизни', text: 'Восстановите хиты раненым существам в пределах 30 футов.', subclass: true },
-    ],
-  },
-  {
-    id: 'druid',
-    name: 'Друид',
-    hitDie: 'd8',
-    saves: ['int', 'wis'],
-    casting: 'wis',
-    subclassName: 'Круг земли',
-    weaponMastery: false,
-    spellIds: ['cure-wounds', 'thunderwave'],
-    features: [
-      { id: 'wild-shape', name: 'Дикий облик', text: 'Бонусное действие. Примите облик зверя, которого видели.', subclass: false },
-      { id: 'natural-recovery', name: 'Природное восстановление', text: 'На коротком отдыхе верните часть потраченных ячеек.', subclass: true },
-    ],
-  },
-  {
-    id: 'fighter',
-    name: 'Воин',
-    hitDie: 'd10',
-    saves: ['str', 'con'],
-    casting: null,
-    subclassName: 'Мастер боевых искусств',
-    weaponMastery: true,
-    spellIds: [],
-    features: [
-      { id: 'second-wind', name: 'Второе дыхание', text: 'Бонусное действие. Лечение костью живучести.', formula: '1d10+1', subclass: false },
-      { id: 'maneuver', name: 'Приём', text: 'Кость превосходства d8 к атаке, проверке или урону.', formula: '1d8', subclass: true },
-    ],
-  },
-  {
-    id: 'monk',
-    name: 'Монах',
-    hitDie: 'd8',
-    saves: ['str', 'dex'],
-    casting: null,
-    subclassName: 'Воин открытой ладони',
-    weaponMastery: false,
-    spellIds: [],
-    features: [
-      { id: 'martial-arts', name: 'Боевые искусства', text: 'Безоружный удар или удар монашеского оружия.', formula: '1d6', subclass: false },
-      { id: 'open-hand', name: 'Открытая ладонь', text: 'После шквала ударов цель падает, отлетает или теряет реакции.', subclass: true },
-    ],
-  },
-  {
-    id: 'paladin',
-    name: 'Паладин',
-    hitDie: 'd10',
-    saves: ['wis', 'cha'],
-    casting: 'cha',
-    subclassName: 'Клятва преданности',
-    weaponMastery: true,
-    spellIds: ['cure-wounds', 'bless'],
-    features: [
-      { id: 'smite', name: 'Божественная кара', text: 'Трата ячейки добавляет урон излучением к рукопашной атаке.', formula: '2d8', subclass: false },
-      { id: 'sacred-weapon', name: 'Священное оружие', text: 'Бонусное действие. Атаки оружием получают бонус Харизмы.', subclass: true },
-    ],
-  },
-  {
-    id: 'ranger',
-    name: 'Следопыт',
-    hitDie: 'd10',
-    saves: ['str', 'dex'],
-    casting: 'wis',
-    subclassName: 'Охотник',
-    weaponMastery: true,
-    spellIds: ['hunters-mark', 'cure-wounds'],
-    features: [
-      { id: 'favored-enemy', name: 'Избранный враг', text: 'Преимущество на проверки, чтобы выследить существо.', subclass: false },
-      { id: 'colossus-slayer', name: 'Убийца колоссов', text: 'Один раз за ход 1d8, если у цели уже не полные хиты.', formula: '1d8', subclass: true },
-    ],
-  },
-  {
-    id: 'rogue',
-    name: 'Плут',
-    hitDie: 'd8',
-    saves: ['dex', 'int'],
-    casting: null,
-    subclassName: 'Вор',
-    weaponMastery: true,
-    spellIds: [],
-    features: [
-      { id: 'sneak-attack', name: 'Скрытая атака', text: 'Дополнительный урон, если атака с преимуществом или союзник рядом с целью.', formula: '1d6', subclass: false },
-      { id: 'fast-hands', name: 'Быстрые руки', text: 'Бонусным действием ловкость рук, использование предмета или отмычки.', subclass: true },
-    ],
-  },
-  {
-    id: 'sorcerer',
-    name: 'Чародей',
-    hitDie: 'd6',
-    saves: ['con', 'cha'],
-    casting: 'cha',
-    subclassName: 'Драконье чародейство',
-    weaponMastery: false,
-    spellIds: ['fire-bolt', 'magic-missile', 'shield'],
-    features: [
-      { id: 'metamagic', name: 'Метамагия', text: 'На заклинание: далёкая, усиленная или осторожная метамагия.', subclass: false },
-      { id: 'elemental-affinity', name: 'Стихийное сродство', text: 'Добавьте модификатор Харизмы к урону своей стихии дракона.', subclass: true },
-    ],
-  },
-  {
-    id: 'warlock',
-    name: 'Колдун',
-    hitDie: 'd8',
-    saves: ['wis', 'cha'],
-    casting: 'cha',
-    subclassName: 'Исчадие',
-    weaponMastery: false,
-    spellIds: ['eldritch-blast', 'hex'],
-    features: [
-      { id: 'patron', name: 'Покровитель', text: 'Магия исчадия. Мистический заряд и сглаз в списке заклинаний.', subclass: false },
-      { id: 'dark-blessing', name: 'Тёмное благословение', text: 'Когда враг падает до 0 хитов рядом с вами, получите временные хиты.', subclass: true },
-    ],
-  },
-  {
-    id: 'wizard',
-    name: 'Волшебник',
-    hitDie: 'd6',
-    saves: ['int', 'wis'],
-    casting: 'int',
-    subclassName: 'Воплотитель',
-    weaponMastery: false,
-    spellIds: ['fire-bolt', 'ray-of-frost', 'magic-missile', 'shield'],
-    features: [
-      { id: 'spellbook', name: 'Книга заклинаний', text: 'Ритуалы из книги можно читать, не тратя ячейку.', subclass: false },
-      { id: 'sculpt', name: 'Перекройка заклинаний', text: 'Союзники в области вашей магии проходят спасбросок и не получают урон при успехе.', subclass: true },
-    ],
-  },
-]
-
-const classes: SrdSeed[] = classDrafts.map(draft => ({
-  id: `class-${draft.id}`,
-  kind: 'class' as const,
-  name: draft.name,
-  body: {
-    hitDie: draft.hitDie,
-    saves: draft.saves,
-    casting: draft.casting,
-    subclassId: `subclass-${draft.id}`,
-    subclassName: draft.subclassName,
-    feature: draft.features.map(item => item.name).join('. '),
-    weaponMastery: draft.weaponMastery,
-    skillChoices: skillChoicesByDraft[draft.id],
-    skills: skillOfferByDraft[draft.id],
-    spellIds: draft.spellIds.map(id => `spell-${id}`),
-    features: draft.features,
-  },
-}))
 
 export function readClassFeatures(body: Record<string, unknown>): ClassFeature[] {
   if (!Array.isArray(body.features))
@@ -269,12 +58,136 @@ export function readClassFeatures(body: Record<string, unknown>): ClassFeature[]
       id: row.id,
       name: row.name,
       text: row.text,
-      subclass: row.subclass === true,
+      level: typeof row.level === 'number' ? row.level : 1,
+      subclass: row.subclass === true || typeof row.subclassId === 'string',
     }
+    if (typeof row.subclassId === 'string')
+      feature.subclassId = row.subclassId
     if (typeof row.formula === 'string' && row.formula.length > 0)
       feature.formula = row.formula
     return [feature]
   })
+}
+
+export function readClassTables(body: Record<string, unknown>): ClassTable[] {
+  if (!Array.isArray(body.tables))
+    return []
+  return body.tables.flatMap((item) => {
+    if (!item || typeof item !== 'object')
+      return []
+    const row = item as Record<string, unknown>
+    if (typeof row.id !== 'string' || typeof row.name !== 'string' || !row.values || typeof row.values !== 'object')
+      return []
+    const values: Record<string, string> = {}
+    for (const [level, value] of Object.entries(row.values as Record<string, unknown>)) {
+      if (typeof value === 'string')
+        values[level] = value
+    }
+    return [{ id: row.id, name: row.name, values }]
+  })
+}
+
+const formulaTableByFeature: Record<string, string> = {
+  'bardic-inspiration': 'bardic-die',
+  'second-wind': 'second-wind',
+  'sneak-attack': 'sneak-attack',
+  'martial-arts': 'martial-arts',
+}
+
+function scaledFormula(feature: ClassFeature, tables: ClassTable[], level: number) {
+  if (feature.id === 'second-wind')
+    return `1d10+${level}`
+  const tableId = formulaTableByFeature[feature.id] ?? feature.id
+  const table = tables.find(item => item.id === tableId || item.id === feature.id || item.id.replace(/-count$/, '') === feature.id)
+  const value = table?.values[String(level)]
+  if (value && /\d+d\d+/.test(value))
+    return value.replace(/^\+/, '')
+  if (feature.formula)
+    return feature.formula.replace(/\blevel\b/gi, String(level))
+  return undefined
+}
+
+export function featuresForSheet(classId: string, subclassId: string, level: number): ClassFeature[] {
+  const klass = srdById(classId)
+  if (!klass || klass.kind !== 'class')
+    return []
+  const tables = readClassTables(klass.body)
+  const chosen = subclassId.startsWith('subclass-') ? subclassId : subclassId ? `subclass-${subclassId}` : ''
+  const subclass = chosen ? srdById(chosen) : null
+  const classFeatures = readClassFeatures(klass.body).map(feature => ({
+    ...feature,
+    formula: scaledFormula(feature, tables, level),
+  }))
+  const subFeatures = subclass?.kind === 'subclass'
+    ? readClassFeatures(subclass.body).map(feature => ({
+        ...feature,
+        subclass: true,
+        subclassId: subclass.id,
+        formula: scaledFormula(feature, tables, level),
+      }))
+    : []
+  return [...classFeatures, ...subFeatures]
+    .filter(feature => feature.level <= level && !isMetaFeature(feature.name))
+    .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, 'ru'))
+}
+
+function isMetaFeature(name: string) {
+  return /подкласс|список заклинаний|увеличение характеристик|эпический дар|основные черты/i.test(name)
+    || /subclass|spell list|ability score|epic boon|core .+ traits|spell slots|slot level/i.test(name)
+}
+
+export function resourcesForLevel(classId: string, level: number, previous: ClassResource[] = []): ClassResource[] {
+  const klass = srdById(classId)
+  if (!klass)
+    return previous
+  const spentById = new Map(previous.map(item => [item.id, item.spent]))
+  return readClassTables(klass.body).flatMap((table) => {
+    if (skipResource.test(table.id))
+      return []
+    const raw = table.values[String(level)]
+    if (!raw || !/^\d+$/.test(raw))
+      return []
+    const max = Number(raw)
+    const spent = Math.min(spentById.get(table.id) ?? 0, max)
+    return [{
+      id: table.id,
+      name: table.name,
+      max,
+      spent,
+      recover: recoverByTable[table.id] ?? 'long',
+    }]
+  })
+}
+
+export function unarmoredAbility(classId: string): 'con' | 'wis' | null {
+  const value = srdById(classId)?.body.unarmored
+  if (value === 'con' || value === 'wis')
+    return value
+  return null
+}
+
+export function subclassLevelOf(classId: string) {
+  const value = srdById(classId)?.body.subclassLevel
+  return typeof value === 'number' ? value : 3
+}
+
+export function asiLevelsOf(classId: string) {
+  const list = srdById(classId)?.body.asiLevels
+  if (!Array.isArray(list))
+    return [4, 8, 12, 16, 19]
+  return list.filter((item): item is number => typeof item === 'number')
+}
+
+export function subclassesForClass(classId: string) {
+  const id = classId.replace(/^class-/, '')
+  return srdCatalog.filter(entry => entry.kind === 'subclass' && entry.body.classId === id)
+}
+
+export function isSubclassChosen(subclassId: string) {
+  if (!subclassId)
+    return false
+  const id = subclassId.startsWith('subclass-') ? subclassId : `subclass-${subclassId}`
+  return srdById(id)?.kind === 'subclass'
 }
 
 export function readSpellIds(body: Record<string, unknown>) {
@@ -282,6 +195,40 @@ export function readSpellIds(body: Record<string, unknown>) {
     return []
   return body.spellIds.filter((id): id is string => typeof id === 'string')
 }
+
+const classes: SrdSeed[] = classRows.map(row => ({
+  id: `class-${row.id}`,
+  kind: 'class' as const,
+  name: row.name,
+  body: {
+    hitDie: row.hitDie,
+    saves: row.saves,
+    casting: row.casting,
+    unarmored: row.unarmored,
+    weaponMastery: row.weaponMastery,
+    skillChoices: row.skillChoices,
+    skills: row.skills,
+    spellIds: row.spellIds,
+    subclassLevel: row.subclassLevel,
+    asiLevels: row.asiLevels,
+    traits: row.traits,
+    features: row.features,
+    tables: row.tables,
+  },
+}))
+
+const subclasses: SrdSeed[] = subclassRows
+  .map(row => ({
+    id: `subclass-${row.id}`,
+    kind: 'subclass' as const,
+    name: row.name,
+    body: {
+      classId: row.classId,
+      text: row.text,
+      features: row.features,
+    },
+  }))
+  .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
 
 const species: SrdSeed[] = [
   ['dragonborn', 'Драконорождённый', 30, 'Дыхание дракона, сопротивление урону предка.'],
@@ -292,7 +239,7 @@ const species: SrdSeed[] = [
   ['halfling', 'Полурослик', 30, 'Удача, храбрость, проворство.'],
   ['human', 'Человек', 30, 'Находчивость, дополнительная черта.'],
   ['orc', 'Орк', 30, 'Адреналин, тёмное зрение.'],
-  ['tiefling', 'Тифлинг', 30, 'Тёмное зрение, потустороннее наследие.'],
+  ['tiefling', 'Тифлинг', 30, 'Потустороннее наследие, тёмное зрение.'],
 ].map(([id, name, speed, trait]) => ({
   id: `species-${id}`,
   kind: 'species' as const,
@@ -300,30 +247,22 @@ const species: SrdSeed[] = [
   body: { speed, trait },
 }))
 
-const backgroundDrafts = [
-  { id: 'acolyte', name: 'Послушник', feat: 'magic-initiate-cleric', abilities: ['wis', 'int'], skills: ['insight', 'religion'] },
-  { id: 'criminal', name: 'Преступник', feat: 'alert', abilities: ['dex', 'con'], skills: ['sleight-of-hand', 'stealth'] },
-  { id: 'sage', name: 'Мудрец', feat: 'magic-initiate-wizard', abilities: ['con', 'int'], skills: ['arcana', 'history'] },
-  { id: 'soldier', name: 'Солдат', feat: 'savage-attacker', abilities: ['str', 'con'], skills: ['athletics', 'intimidation'] },
-] as const satisfies readonly { abilities: readonly string[], feat: string, id: string, name: string, skills: readonly Skill[] }[]
-
-const backgrounds: SrdSeed[] = backgroundDrafts.map(draft => ({
-  id: `background-${draft.id}`,
+const backgrounds: SrdSeed[] = backgroundRows.map(row => ({
+  id: `background-${row.id}`,
   kind: 'background' as const,
-  name: draft.name,
-  body: { originFeatId: draft.feat, abilities: [...draft.abilities], skills: [...draft.skills] },
+  name: row.name,
+  body: {
+    originFeatId: row.originFeatId,
+    abilities: [...row.abilities],
+    skills: [...row.skills],
+  },
 }))
 
-const feats: SrdSeed[] = [
-  ['alert', 'Бдительность', 'origin', 'Помеха к инициативе не применяется, когда вас застали врасплох. Можно поменяться инициативой с союзником.'],
-  ['magic-initiate-cleric', 'Посвящённый в магию (жрец)', 'origin', 'Два заговора жреца и одно заклинание 1 круга.'],
-  ['magic-initiate-wizard', 'Посвящённый в магию (волшебник)', 'origin', 'Два заговора волшебника и одно заклинание 1 круга.'],
-  ['savage-attacker', 'Свирепый атакующий', 'origin', 'Один раз за ход перебросьте кости урона оружия.'],
-].map(([id, name, category, text]) => ({
-  id: `feat-${id}`,
+const feats: SrdSeed[] = featRows.map(row => ({
+  id: `feat-${row.id}`,
   kind: 'feat' as const,
-  name: String(name),
-  body: { category, text },
+  name: row.name,
+  body: { category: row.category, text: row.text },
 }))
 
 const spells: SrdSeed[] = spellRows.map(row => ({
@@ -403,26 +342,33 @@ function readShieldGear(): GearStats {
   return { kind: 'shield' }
 }
 
-export const srdCatalog: SrdSeed[] = [
+srdCatalog.length = 0
+srdCatalog.push(
   ...classes,
+  ...subclasses,
   ...species,
   ...backgrounds,
   ...feats,
   ...spells,
   ...monsters,
   ...items,
-]
+)
 
 function isSkill(value: unknown): value is Skill {
   return typeof value === 'string' && (skills as readonly string[]).includes(value)
 }
 
 export function backgroundSkillGrant(backgroundId: string): Skill[] {
-  const entry = srdCatalog.find(item => item.id === backgroundId && item.kind === 'background')
-  const list = entry?.body.skills
+  const entry = srdById(backgroundId)
+  const list = entry?.kind === 'background' ? entry.body.skills : null
   if (!Array.isArray(list))
     return []
   return list.filter(isSkill)
+}
+
+export function originFeatId(backgroundId: string) {
+  const value = srdById(backgroundId)?.body.originFeatId
+  return typeof value === 'string' ? value : null
 }
 
 export function skillChoiceForOrigin(classId: string, backgroundId: string) {
@@ -434,14 +380,30 @@ export function skillChoiceForOrigin(classId: string, backgroundId: string) {
   return {
     granted,
     skillChoices: offer.skillChoices,
-    skills: offer.skills.filter(skill => !grantedSet.has(skill)),
+    // Сколько навыков даёт класс — правило, какие именно — решение мастера, поэтому список класса только подсказка.
+    suggested: offer.skills.filter(skill => !grantedSet.has(skill)),
+    skills: skills.filter(skill => !grantedSet.has(skill)),
   }
 }
 
-export function acceptSkillChoice(chosen: readonly Skill[]) {
-  if (new Set(chosen).size !== chosen.length)
+export function acceptSkillChoice(chosen: readonly Skill[], classId: string, backgroundId: string) {
+  const choice = skillChoiceForOrigin(classId, backgroundId)
+  if (!choice)
     return null
-  return [...chosen]
+  const unique = new Set(chosen)
+  if (unique.size !== chosen.length)
+    return null
+  for (const skill of choice.granted) {
+    if (!unique.has(skill))
+      return null
+  }
+  const picked = chosen.filter(skill => !choice.granted.includes(skill))
+  if (picked.length !== choice.skillChoices)
+    return null
+  const offered = new Set(choice.skills)
+  if (picked.some(skill => !offered.has(skill)))
+    return null
+  return [...choice.granted, ...picked]
 }
 
 export function gearByItemId(itemId: string) {

@@ -1,7 +1,7 @@
 import type { AttackDef, CharacterDto, TokenDto } from '@dnd/shared'
-import { abilityModifier, isDeadFromExhaustion } from '@dnd/shared'
-import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput, Divider, Drawer, FileButton, Group, NumberInput, Paper, SegmentedControl, Select, Slider, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
-import { IconTrash } from '@tabler/icons-react'
+import { abilities, abilityLabel, abilityModifier, isDeadFromExhaustion } from '@dnd/shared'
+import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput, Divider, Drawer, FileButton, Group, Modal, NumberInput, Paper, SegmentedControl, Select, Slider, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
 import { MapBoard } from '@/features/table-map/board'
@@ -12,6 +12,7 @@ import { DiceLog, DiceTray } from '@/pages/table/dice-tray'
 import { GearList } from '@/pages/table/gear-list'
 import { liveSnapshot } from '@/pages/table/live'
 import { SkillRolls } from '@/pages/table/skill-rolls'
+import { srdQuery } from '@/shared/api'
 import { AccountMenu } from '@/shared/ui/account-menu'
 import {
   abilityScoreEdited,
@@ -39,15 +40,19 @@ import {
   gridOpacity,
   gridOpacityChanged,
   gridPresetChosen,
+  heroCreateRequested,
   heroDeleteId,
   heroDeletePressed,
+  heroNotesSaved,
   heroRenamed,
   hexFacing,
   hexFacingChanged,
   hpMaxEdited,
+  hpTempEdited,
   imageScale,
   imageScaleChanged,
   inspirationToggled,
+  levelChoiceSubmitted,
   levelUpRequested,
   mapFileChosen,
   mapMeasured,
@@ -372,9 +377,11 @@ function HeroesPanel(props: { onOpenHero: (characterId: string) => void }) {
   const state = useUnit({
     roster,
     sceneTokens,
+    createHero: heroCreateRequested,
   })
   return (
     <Stack gap="sm">
+      <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void state.createHero()}>Новый герой</Button>
       {state.roster.length === 0 && <Text size="xs" c="dimmed">Героев пока нет</Text>}
       {state.roster.map(character => (
         <HeroCard
@@ -565,7 +572,7 @@ function TableSetup() {
 }
 
 function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady: boolean }) {
-  const { toggle, rest, catalog, rollAttack, tokens, master, viewer, pendingHeroDelete, deleteHero, renameHero, raiseLevel, editHpMax } = useUnit({
+  const { toggle, rest, catalog, rollAttack, tokens, master, viewer, pendingHeroDelete, deleteHero, renameHero, raiseLevel, editHpMax, editHpTemp, saveNotes } = useUnit({
     toggle: characterPlacementToggled,
     rest: restRequested,
     catalog: catalogNames,
@@ -578,6 +585,8 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
     renameHero: heroRenamed,
     raiseLevel: levelUpRequested,
     editHpMax: hpMaxEdited,
+    editHpTemp: hpTempEdited,
+    saveNotes: heroNotesSaved,
   })
   const sheet = props.sheet
   const editable = master || sheet.userId === viewer
@@ -608,7 +617,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
                 : <Text fw={700}>{sheet.name}</Text>}
               <Text size="sm">{sheetTitle(sheet, catalog)}</Text>
               <Text size="sm">{`КД ${sheet.ac} · ${sheet.speed} фт`}</Text>
-              {editable && sheet.level < 20 && (
+              {editable && sheet.level < 20 && !sheet.pendingChoice && (
                 <Button size="xs" variant="light" onClick={() => raiseLevel(sheet.id)}>Новый уровень</Button>
               )}
               {master && (
@@ -629,7 +638,33 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
           <Stack gap={4} w={360}>
             <HpBar current={sheet.hpCurrent} max={sheet.hpMax} temp={sheet.hpTemp} />
             {editable && <HpAdjust tokenId={tokenId} characterId={sheet.id} />}
+            {editable && (
+              <NumberInput
+                key={`${sheet.id}:${sheet.hpTemp}`}
+                size="xs"
+                w={120}
+                label="Временные хиты"
+                min={0}
+                max={999}
+                hideControls
+                allowDecimal={false}
+                defaultValue={sheet.hpTemp}
+                onBlur={event => editHpTemp({ characterId: sheet.id, hpTemp: readInt(event.currentTarget.value, sheet.hpTemp) })}
+              />
+            )}
           </Stack>
+          {editable && <LevelChoiceModal sheet={sheet} />}
+          {editable && (
+            <Textarea
+              key={`${sheet.id}:notes`}
+              size="xs"
+              w={360}
+              label="Заметки"
+              minRows={2}
+              defaultValue={sheet.notes}
+              onBlur={event => saveNotes({ characterId: sheet.id, notes: event.currentTarget.value })}
+            />
+          )}
           {editable && (
             <Group gap="xs">
               <Button size="xs" variant={props.onMap ? 'default' : 'light'} disabled={!props.sceneReady} onClick={() => toggle(sheet.id)}>
@@ -731,7 +766,7 @@ function HeroAttack(props: {
   )
 }
 
-const abilityLabel = {
+const abilityShort = {
   str: 'Сил',
   dex: 'Лов',
   con: 'Тел',
@@ -742,10 +777,96 @@ const abilityLabel = {
 
 const abilityOrder = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
 
+const pendingTitle = {
+  asi: 'Увеличение характеристик',
+  subclass: 'Подкласс',
+  feat: 'Черта',
+} as const satisfies Record<NonNullable<CharacterDto['pendingChoice']>, string>
+
+function LevelChoiceModal(props: { sheet: CharacterDto }) {
+  const { submit, entries } = useUnit({
+    submit: levelChoiceSubmitted,
+    entries: srdQuery.data,
+  })
+  const pending = props.sheet.pendingChoice
+  const [bonuses, setBonuses] = useState({ str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 })
+  const [subclassId, setSubclassId] = useState<string | null>(null)
+  const [featId, setFeatId] = useState<string | null>(null)
+  const total = abilities.reduce((sum, key) => sum + bonuses[key], 0)
+  const classKey = props.sheet.classId.replace(/^class-/, '')
+  const subclassOptions = (entries ?? [])
+    .filter(entry => entry.kind === 'subclass' && entry.body.classId === classKey)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+    .map(entry => ({ value: entry.id, label: entry.name }))
+  const pickedSubclass = subclassId ?? (subclassOptions.length === 1 ? subclassOptions[0].value : null)
+  const featOptions = (entries ?? [])
+    .filter((entry) => {
+      if (entry.kind !== 'feat')
+        return false
+      const category = entry.body.category
+      if (pending === 'feat')
+        return category === 'epic-boon' || category === 'asi'
+      return category !== 'epic-boon'
+    })
+    .map(entry => ({ value: entry.id, label: entry.name }))
+  if (!pending)
+    return null
+  return (
+    <Modal opened closeOnClickOutside={false} closeOnEscape={false} withCloseButton={false} title={pendingTitle[pending]} onClose={() => undefined}>
+      <Stack gap="sm">
+        {pending === 'asi' && (
+          <>
+            <Text size="sm">Распредели +2 между характеристиками (не выше 20) или возьми черту.</Text>
+            {abilities.map(ability => (
+              <NumberInput
+                key={ability}
+                size="xs"
+                label={`${abilityLabel[ability]} (${props.sheet.abilities[ability]})`}
+                min={0}
+                max={2}
+                hideControls
+                value={bonuses[ability]}
+                onChange={value => setBonuses(current => ({ ...current, [ability]: Math.max(0, Math.trunc(Number(value) || 0)) }))}
+              />
+            ))}
+            <Button disabled={total !== 2} onClick={() => submit({ characterId: props.sheet.id, body: { kind: 'asi', bonuses } })}>
+              {`Применить +${total}`}
+            </Button>
+            <Select label="Или черта" data={featOptions} value={featId} onChange={setFeatId} />
+            <Button disabled={!featId} variant="light" onClick={() => featId && submit({ characterId: props.sheet.id, body: { kind: 'feat', featId } })}>
+              Взять черту
+            </Button>
+          </>
+        )}
+        {pending === 'subclass' && (
+          <>
+            <Text size="sm" c="dimmed">Четыре подкласса PHB 2024. Текст умений в справочнике только у SRD-варианта класса.</Text>
+            <Select label="Подкласс" data={subclassOptions} value={pickedSubclass} onChange={setSubclassId} />
+            <Button disabled={!pickedSubclass} onClick={() => pickedSubclass && submit({ characterId: props.sheet.id, body: { kind: 'subclass', subclassId: pickedSubclass } })}>
+              Выбрать
+            </Button>
+          </>
+        )}
+        {pending === 'feat' && (
+          <>
+            <Select label="Черта или дар" data={featOptions} value={featId} onChange={setFeatId} />
+            <Button disabled={!featId} onClick={() => featId && submit({ characterId: props.sheet.id, body: { kind: 'feat', featId } })}>
+              Выбрать
+            </Button>
+          </>
+        )}
+      </Stack>
+    </Modal>
+  )
+}
+
 function sheetTitle(sheet: CharacterDto, catalog: Record<string, string>) {
   const klass = catalog[sheet.classId] ?? 'Герой'
+  const subclass = catalog[sheet.subclassId]
   const species = catalog[sheet.speciesId]
-  return species ? `${klass} ${sheet.level} · ${species}` : `${klass} ${sheet.level}`
+  const klassLine = subclass ? `${klass} · ${subclass} ${sheet.level}` : `${klass} ${sheet.level}`
+  return species ? `${klassLine} · ${species}` : klassLine
 }
 
 function modifierText(score: number) {
@@ -762,7 +883,7 @@ function AbilityScores(props: { sheet: CharacterDto, master: boolean }) {
       <Group gap="xs" grow>
         {abilityOrder.map(key => (
           <Stack key={key} gap={0} align="center">
-            <Text size="xs" c="dimmed">{abilityLabel[key]}</Text>
+            <Text size="xs" c="dimmed">{abilityShort[key]}</Text>
             <Text size="sm" fw={700}>{modifierText(props.sheet.abilities[key])}</Text>
             <Text size="xs">{String(props.sheet.abilities[key])}</Text>
           </Stack>

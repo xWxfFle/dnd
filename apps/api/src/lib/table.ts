@@ -1,10 +1,11 @@
-import type { Abilities, Ability, AttackDef, CampaignRole, CharacterDto, CombatDto, CreaturePresetDto, DiceRollDto, DieTerm, SceneDto, Skill, SnapshotDto, SpellSlot, TokenDto } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, CampaignRole, CharacterDto, ClassResource, CombatDto, CreaturePresetDto, DiceRollDto, DieTerm, PendingChoice, SceneDto, Skill, SnapshotDto, SpellSlot, TokenDto } from '@dnd/shared'
 import { statSync } from 'node:fs'
 import {
   abilities,
   abilityModifier,
   acceptSkillChoice,
   armorClass,
+  asiLevelsOf,
   carrySpellSlots,
   concealEnemies,
   equipmentSheet,
@@ -13,7 +14,9 @@ import {
   hitDieSidesForClass,
   hitPointsOnLevelUp,
   isDeadFromExhaustion,
+  isSubclassChosen,
   longRestExhaustion,
+  originFeatId,
   proficiencyBonus,
   readAbilities,
   readArmorClass,
@@ -21,12 +24,16 @@ import {
   readInventory,
   readSaveOverrides,
   readSpellIds,
+  resourcesForLevel,
   rollD20,
   rollDamage,
   rollFormula,
   skills,
   spellSlotsForClass,
+  srdById,
   srdCatalog,
+  subclassLevelOf,
+  unarmoredAbility,
 } from '@dnd/shared'
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { db } from '../db'
@@ -70,21 +77,60 @@ function asAttacks(value: unknown): AttackDef[] {
   return Array.isArray(value) ? value as AttackDef[] : []
 }
 
-function gearOfRow(row: Pick<CharacterRow, 'abilities' | 'level' | 'inventory' | 'attacks'>) {
+function asResources(value: unknown): ClassResource[] {
+  if (!Array.isArray(value))
+    return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object')
+      return []
+    const row = item as ClassResource
+    if (typeof row.id !== 'string' || typeof row.name !== 'string' || typeof row.max !== 'number')
+      return []
+    const recover = row.recover === 'short' || row.recover === 'shortOne' ? row.recover : 'long'
+    return [{ id: row.id, name: row.name, max: row.max, spent: typeof row.spent === 'number' ? row.spent : 0, recover }]
+  })
+}
+
+function asIdList(value: unknown) {
+  if (!Array.isArray(value))
+    return []
+  return value.filter((item): item is string => typeof item === 'string')
+}
+
+const pendingByValue: Record<string, PendingChoice | undefined> = {
+  asi: 'asi',
+  subclass: 'subclass',
+  feat: 'feat',
+}
+
+function pendingOf(value: unknown): PendingChoice | null {
+  return typeof value === 'string' ? pendingByValue[value] ?? null : null
+}
+
+function choiceAtLevel(classId: string, level: number): PendingChoice | null {
+  if (level === subclassLevelOf(classId))
+    return 'subclass'
+  if (!asiLevelsOf(classId).includes(level))
+    return null
+  return level >= 19 ? 'feat' : 'asi'
+}
+
+function gearOfRow(row: Pick<CharacterRow, 'abilities' | 'classId' | 'level' | 'inventory' | 'attacks'>) {
   return equipmentSheet({
     abilities: asAbilities(row.abilities),
     level: row.level,
     inventory: readInventory(row.inventory),
     attacks: asAttacks(row.attacks),
     gearOf: gearByItemId,
+    unarmored: unarmoredAbility(row.classId),
   })
 }
 
-export function armorFromCharacter(row: Pick<CharacterRow, 'abilities' | 'level' | 'inventory' | 'attacks'>) {
+export function armorFromCharacter(row: Pick<CharacterRow, 'abilities' | 'classId' | 'level' | 'inventory' | 'attacks'>) {
   return gearOfRow(row).ac
 }
 
-export function gearFields(row: Pick<CharacterRow, 'abilities' | 'level' | 'attacks'>, inventory: unknown) {
+export function gearFields(row: Pick<CharacterRow, 'abilities' | 'classId' | 'level' | 'attacks'>, inventory: unknown) {
   const gear = gearOfRow({ ...row, inventory })
   return { inventory: gear.inventory, ac: gear.ac, attacks: gear.attacks }
 }
@@ -96,6 +142,8 @@ const characterKindByValue: Record<string, 'hero' | 'custom' | undefined> = {
 
 export function toCharacterDto(row: CharacterRow): CharacterDto {
   const gear = gearOfRow(row)
+  const storedResources = asResources(row.classResources)
+  const storedFeats = asIdList(row.featIds)
   return {
     id: row.id,
     campaignId: row.campaignId,
@@ -129,7 +177,22 @@ export function toCharacterDto(row: CharacterRow): CharacterDto {
     notes: row.notes,
     avatarUrl: row.avatarPath ? markedUrl(`/api/characters/${row.id}/avatar`, row.avatarPath) : null,
     kind: characterKindByValue[row.kind] ?? 'hero',
+    classResources: storedResources.length > 0 ? storedResources : resourcesForLevel(row.classId, row.level),
+    featureToggles: asIdList(row.featureToggles),
+    featIds: storedFeats.length > 0 ? storedFeats : originFeatOf(row.backgroundId),
+    pendingChoice: pendingOf(row.pendingChoice) ?? pendingSubclassOf(row),
   }
+}
+
+function originFeatOf(backgroundId: string) {
+  const id = originFeatId(backgroundId)
+  return id ? [id] : []
+}
+
+function pendingSubclassOf(row: Pick<CharacterRow, 'classId' | 'subclassId' | 'level'>): PendingChoice | null {
+  if (row.level < subclassLevelOf(row.classId) || isSubclassChosen(row.subclassId))
+    return null
+  return 'subclass'
 }
 
 export function toSceneDto(row: SceneRow, role: CampaignRole): SceneDto {
@@ -240,7 +303,7 @@ export async function createCharacter(input: {
   const background = srd(input.backgroundId)
   if (!classEntry || classEntry.kind !== 'class' || !species || !background)
     return null
-  const picked = acceptSkillChoice(input.skillProficiencies)
+  const picked = acceptSkillChoice(input.skillProficiencies, input.classId, input.backgroundId)
   if (!picked)
     return null
   const saveProficiencies = asAbilityList(classEntry.body.saves)
@@ -266,36 +329,41 @@ export async function createCharacter(input: {
     .map(id => srd(id))
     .filter((entry): entry is NonNullable<ReturnType<typeof srd>> => entry?.kind === 'spell')
     .map(entry => knownSpellFromSrd(entry))
+  const originFeat = originFeatId(input.backgroundId)
   const [row] = await db.insert(characters).values({
     campaignId: input.campaignId,
     userId: input.userId,
     name: input.name,
     speciesId: input.speciesId,
     classId: input.classId,
-    subclassId: String(classEntry.body.subclassId ?? input.classId),
+    subclassId: '',
     backgroundId: input.backgroundId,
     abilities: input.abilities,
     skillProficiencies: picked,
     saveProficiencies,
     hpCurrent: hpMax,
     hpMax,
-    ac: armorClass({ abilities: input.abilities }),
+    ac: armorClass({ abilities: input.abilities, unarmored: unarmoredAbility(input.classId) }),
     speed,
     attacks: spellAttack,
     spells: knownSpells,
-    slots: casting ? [{ level: 1, max: 2, spent: 0 }] : [],
+    slots: spellSlotsForClass(input.classId, 1),
     conditions: [],
     deathSaves: { successes: 0, failures: 0 },
     inventory: [],
-    weaponMasteries: classEntry.body.weaponMastery ? ['отталкивание'] : [],
+    weaponMasteries: [],
     hitDie,
     hitDiceRemaining: 1,
     castingAbility: casting,
+    classResources: resourcesForLevel(input.classId, 1),
+    featureToggles: [],
+    featIds: originFeat ? [originFeat] : [],
+    pendingChoice: null,
   }).returning()
   return toCharacterDto(row)
 }
 
-const dmStatKeys = ['abilities', 'hpMax', 'hpCurrent', 'ac', 'speed', 'skillProficiencies', 'saveProficiencies', 'level'] as const
+const dmStatKeys = ['abilities', 'hpMax', 'hpCurrent', 'ac', 'speed', 'skillProficiencies', 'saveProficiencies', 'level', 'classId', 'subclassId', 'featIds', 'pendingChoice'] as const
 
 export function sheetPatchForRole<T extends Record<string, unknown>>(role: CampaignRole, body: T) {
   if (role === 'dm')
@@ -330,12 +398,15 @@ function withSpellAttack(attacks: AttackDef[], scores: Abilities, casting: strin
 export async function levelUpCharacter(row: CharacterRow) {
   if (row.level >= 20)
     return null
+  if (pendingOf(row.pendingChoice) || pendingSubclassOf(row))
+    return null
   const nextLevel = row.level + 1
   const scores = asAbilities(row.abilities)
   const gain = hitPointsOnLevelUp(row.hitDie, scores.con)
   const hpMax = row.hpMax + gain
   const hpCurrent = row.hpCurrent + gain
-  const gear = gearFields({ abilities: scores, level: nextLevel, attacks: asAttacks(row.attacks) }, row.inventory)
+  const gear = gearFields({ abilities: scores, classId: row.classId, level: nextLevel, attacks: asAttacks(row.attacks) }, row.inventory)
+  const pendingChoice = pendingOf(row.pendingChoice) ?? choiceAtLevel(row.classId, nextLevel)
   const [updated] = await db.update(characters).set({
     level: nextLevel,
     hpMax,
@@ -345,8 +416,71 @@ export async function levelUpCharacter(row: CharacterRow) {
     ac: gear.ac,
     attacks: withSpellAttack(gear.attacks, scores, row.castingAbility, nextLevel),
     inventory: gear.inventory,
+    classResources: resourcesForLevel(row.classId, nextLevel, asResources(row.classResources)),
+    pendingChoice,
   }).where(eq(characters.id, row.id)).returning()
   await mirrorSheetHp(row.id, hpCurrent, hpMax)
+  return updated
+}
+
+export async function resolveCharacterChoice(row: CharacterRow, body: {
+  kind: PendingChoice
+  bonuses?: Partial<Abilities>
+  subclassId?: string
+  featId?: string
+}) {
+  const pending = pendingOf(row.pendingChoice) ?? pendingSubclassOf(row)
+  if (!pending)
+    return null
+  if (body.kind === 'subclass') {
+    if (pending !== 'subclass' || !body.subclassId)
+      return null
+    const id = body.subclassId.startsWith('subclass-') ? body.subclassId : `subclass-${body.subclassId}`
+    const entry = srdById(id)
+    if (entry?.kind !== 'subclass' || entry.body.classId !== row.classId.replace(/^class-/, ''))
+      return null
+    const [updated] = await db.update(characters).set({ subclassId: id, pendingChoice: null }).where(eq(characters.id, row.id)).returning()
+    return updated
+  }
+  if (body.kind === 'feat') {
+    if (pending !== 'feat' && pending !== 'asi')
+      return null
+    if (!body.featId)
+      return null
+    const id = body.featId.startsWith('feat-') ? body.featId : `feat-${body.featId}`
+    const feat = srdById(id)
+    if (feat?.kind !== 'feat')
+      return null
+    if (pending === 'asi' && feat.body.category === 'epic-boon')
+      return null
+    const featIds = [...new Set([...asIdList(row.featIds), id])]
+    const [updated] = await db.update(characters).set({ featIds, pendingChoice: null }).where(eq(characters.id, row.id)).returning()
+    return updated
+  }
+  if (pending !== 'asi' || !body.bonuses)
+    return null
+  const scores = asAbilities(row.abilities)
+  const next = { ...scores }
+  let total = 0
+  for (const key of abilities) {
+    const bonus = body.bonuses[key] ?? 0
+    if (!Number.isInteger(bonus) || bonus < 0 || bonus > 2)
+      return null
+    total += bonus
+    next[key] = scores[key] + bonus
+    if (next[key] > 20 || next[key] < 1)
+      return null
+  }
+  if (total !== 2)
+    return null
+  const sheet = abilitySheet({ ...row, abilities: next }, next)
+  const [updated] = await db.update(characters).set({
+    abilities: next,
+    ac: sheet.ac,
+    attacks: sheet.attacks,
+    inventory: sheet.inventory,
+    pendingChoice: null,
+  }).where(eq(characters.id, row.id)).returning()
   return updated
 }
 
@@ -359,7 +493,7 @@ export async function mirrorSheetHp(characterId: string, hpCurrent: number, hpMa
 }
 
 export function abilitySheet(row: CharacterRow, scores: Abilities) {
-  const gear = gearFields({ abilities: scores, level: row.level, attacks: asAttacks(row.attacks) }, row.inventory)
+  const gear = gearFields({ abilities: scores, classId: row.classId, level: row.level, attacks: asAttacks(row.attacks) }, row.inventory)
   return {
     abilities: scores,
     ac: gear.ac,
@@ -490,6 +624,7 @@ export async function applyRest(characterId: string, kind: 'short' | 'long') {
       hitDiceRemaining: Math.max(1, row.hitDiceRemaining + Math.max(1, Math.floor(row.level / 2))),
       slots: slots.map(slot => ({ ...slot, spent: 0 })),
       deathSaves: { successes: 0, failures: 0 },
+      classResources: asResources(row.classResources).map(item => ({ ...item, spent: 0 })),
     }).where(eq(characters.id, characterId)).returning()
     return toCharacterDto(updated)
   }
@@ -499,6 +634,13 @@ export async function applyRest(characterId: string, kind: 'short' | 'long') {
   const [updated] = await db.update(characters).set({
     hpCurrent: Math.min(row.hpMax, row.hpCurrent + heal),
     hitDiceRemaining: row.hitDiceRemaining - 1,
+    classResources: asResources(row.classResources).map((item) => {
+      if (item.recover === 'short')
+        return { ...item, spent: 0 }
+      if (item.recover === 'shortOne')
+        return { ...item, spent: Math.max(0, item.spent - 1) }
+      return item
+    }),
   }).where(eq(characters.id, characterId)).returning()
   return toCharacterDto(updated)
 }

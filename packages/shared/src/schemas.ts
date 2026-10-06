@@ -121,6 +121,16 @@ export const knownSpellSchema = z.object({
   text: z.string().max(600).optional(),
 })
 
+export const pendingChoiceSchema = z.enum(['asi', 'subclass', 'feat'])
+
+export const classResourceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  max: z.number().int().min(0),
+  spent: z.number().int().min(0),
+  recover: z.enum(['short', 'long', 'shortOne']),
+})
+
 export const characterSchema = z.object({
   id: z.uuid(),
   campaignId: z.uuid(),
@@ -157,6 +167,10 @@ export const characterSchema = z.object({
   notes: z.string(),
   avatarUrl: z.string().nullable(),
   kind: z.enum(['hero', 'custom']),
+  classResources: z.array(classResourceSchema),
+  featureToggles: z.array(z.string()),
+  featIds: z.array(z.string()),
+  pendingChoice: pendingChoiceSchema.nullable(),
 })
 
 export const createCharacterSchema = z.object({
@@ -174,6 +188,30 @@ export const updateCharacterSchema = characterSchema.omit({
   userId: true,
   avatarUrl: true,
 }).partial()
+
+const abilityBonusSchema = z.object({
+  str: z.number().int().min(0).max(2).optional(),
+  dex: z.number().int().min(0).max(2).optional(),
+  con: z.number().int().min(0).max(2).optional(),
+  int: z.number().int().min(0).max(2).optional(),
+  wis: z.number().int().min(0).max(2).optional(),
+  cha: z.number().int().min(0).max(2).optional(),
+})
+
+export const characterChoiceSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('asi'),
+    bonuses: abilityBonusSchema,
+  }),
+  z.object({
+    kind: z.literal('subclass'),
+    subclassId: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal('feat'),
+    featId: z.string().min(1),
+  }),
+])
 
 export const restSchema = z.object({
   kind: z.enum(['short', 'long']),
@@ -331,7 +369,7 @@ export const combatSchema = z.object({
 
 export const srdEntrySchema = z.object({
   id: z.string(),
-  kind: z.enum(['class', 'species', 'background', 'feat', 'spell', 'monster', 'item']),
+  kind: z.enum(['class', 'subclass', 'species', 'background', 'feat', 'spell', 'monster', 'item']),
   name: z.string(),
   body: z.record(z.string(), z.unknown()),
 })

@@ -1,8 +1,8 @@
-import type { Abilities, Ability, AttackDef, CreatePresetInput, InventoryItem, KnownSpell, SaveOverrides, Skill } from '@dnd/shared'
-import { abilityLabel, abilityModifier, d20Formula, formatDiceFormula, parseDice, readAbilities, readArmorClass, readClassFeatures, readDiceFormula, readInventory, readSaveOverrides, saveBonus, skills, tokenSchema } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, CreatePresetInput, InventoryItem, KnownSpell, PendingChoice, SaveOverrides, Skill } from '@dnd/shared'
+import { abilityLabel, abilityModifier, d20Formula, featuresForSheet, formatDiceFormula, parseDice, readAbilities, readArmorClass, readDiceFormula, readInventory, readSaveOverrides, saveBonus, skills, tokenSchema } from '@dnd/shared'
 import { computed, effect, event, reaction, scoped, store } from '@virentia/core'
 import { apiRead, apiSend, srdQuery } from '@/shared/api'
-import { homeRoute } from '@/shared/routing'
+import { characterRoute, homeRoute, tableRoute } from '@/shared/routing'
 import { appScope, readUserId } from '@/shared/session'
 import { readAttacks } from './attacks'
 import { liveSnapshot, sendLiveFx } from './live'
@@ -150,6 +150,14 @@ export const blankMobPlaced = event<{
 }>()
 export const mapFileChosen = event<File>()
 export const featureUsed = event<{ characterId: string, featureId: string }>()
+export const resourceSpent = event<{ characterId: string, resourceId: string }>()
+export const heroCreateRequested = event<void>()
+export const heroNotesSaved = event<{ characterId: string, notes: string }>()
+export const hpTempEdited = event<{ characterId: string, hpTemp: number }>()
+export const levelChoiceSubmitted = event<{
+  characterId: string
+  body: { kind: PendingChoice, bonuses?: Partial<Abilities>, subclassId?: string, featId?: string }
+}>()
 export const spellCast = event<{ characterId: string, spellId: string }>()
 export const spellsReplaced = event<{ characterId: string, spells: KnownSpell[] }>()
 export const sheetHpChanged = event<{ characterId: string, delta: number }>()
@@ -604,7 +612,7 @@ export function bootTableModel() {
       run(characterId) {
         const base = campaignBase()
         const sheet = characterById(characterId)
-        if (!base || !sheet || sheet.level >= 20)
+        if (!base || !sheet || sheet.level >= 20 || sheet.pendingChoice)
           return
         void commandFx({ path: `${base}/characters/${characterId}/level`, method: 'POST' })
       },
@@ -709,13 +717,59 @@ export function bootTableModel() {
       },
     })
     reaction({
+      on: heroCreateRequested,
+      run() {
+        const id = tableRoute.params.value.id
+        if (!id)
+          return
+        void characterRoute.open({ params: { id } })
+      },
+    })
+    reaction({
+      on: heroNotesSaved,
+      run({ characterId, notes }) {
+        patchCharacter(characterId, { notes: notes.slice(0, 20000) })
+      },
+    })
+    reaction({
+      on: hpTempEdited,
+      run({ characterId, hpTemp }) {
+        patchCharacter(characterId, { hpTemp: Math.max(0, Math.trunc(hpTemp)) })
+      },
+    })
+    reaction({
+      on: resourceSpent,
+      run({ characterId, resourceId }) {
+        const sheet = characterById(characterId)
+        if (!sheet)
+          return
+        const pool = sheet.classResources.find(item => item.id === resourceId)
+        if (!pool || pool.spent >= pool.max) {
+          kitError.value = { characterId, message: 'Нет зарядов' }
+          return
+        }
+        kitError.value = null
+        patchCharacter(characterId, {
+          classResources: sheet.classResources.map(item => item.id === resourceId ? { ...item, spent: item.spent + 1 } : item),
+        })
+      },
+    })
+    reaction({
+      on: levelChoiceSubmitted,
+      run({ characterId, body }) {
+        const base = campaignBase()
+        if (!base)
+          return
+        void commandFx({ path: `${base}/characters/${characterId}/choice`, method: 'POST', body })
+      },
+    })
+    reaction({
       on: featureUsed,
       run({ characterId, featureId }) {
         const sheet = characterById(characterId)
         if (!sheet)
           return
-        const classEntry = (srdQuery.data.value ?? []).find(entry => entry.id === sheet.classId)
-        const feature = classEntry ? readClassFeatures(classEntry.body).find(item => item.id === featureId) : undefined
+        const feature = featuresForSheet(sheet.classId, sheet.subclassId, sheet.level).find(item => item.id === featureId)
         if (!feature)
           return
         kitError.value = null
@@ -723,9 +777,20 @@ export function bootTableModel() {
           void sendLiveFx({ type: 'roll', label: feature.name, formula: feature.formula, mode: 'normal' })
           return
         }
-        const active = sheet.conditions.includes(feature.name)
+        const active = sheet.featureToggles.includes(feature.id)
+        const pool = sheet.classResources.find(item => item.id === feature.id || item.id === `${feature.id}s` || item.id.startsWith(feature.id))
+        if (!active && pool && pool.spent >= pool.max) {
+          kitError.value = { characterId, message: 'Нет зарядов' }
+          return
+        }
+        const classResources = !active && pool
+          ? sheet.classResources.map(item => item.id === pool.id ? { ...item, spent: item.spent + 1 } : item)
+          : sheet.classResources
         patchCharacter(characterId, {
-          conditions: active ? sheet.conditions.filter(item => item !== feature.name) : [...sheet.conditions, feature.name],
+          featureToggles: active
+            ? sheet.featureToggles.filter(item => item !== feature.id)
+            : [...sheet.featureToggles, feature.id],
+          classResources,
         })
       },
     })

@@ -1,11 +1,11 @@
 import type { Abilities } from '@dnd/shared'
-import { createCharacterSchema, restSchema, updateCharacterSchema } from '@dnd/shared'
+import { characterChoiceSchema, createCharacterSchema, restSchema, updateCharacterSchema } from '@dnd/shared'
 import { eq, inArray } from 'drizzle-orm'
 import { status } from 'elysia'
 import { db } from '../../db'
 import { characters, combatants, tokens } from '../../db/schema'
 import { deleteToken } from '../../lib/combat'
-import { abilitySheet, applyRest, createCharacter, gearFields, levelUpCharacter, mirrorSheetHp, sheetPatchForRole, toCharacterDto } from '../../lib/table'
+import { abilitySheet, applyRest, createCharacter, gearFields, levelUpCharacter, mirrorSheetHp, resolveCharacterChoice, sheetPatchForRole, toCharacterDto } from '../../lib/table'
 import { rejectUnlessImage, uploadName, writeUpload } from '../../lib/uploads'
 import { broadcast } from '../../live/hub'
 import { campaignRoutes } from '../../plugins/campaign-access'
@@ -108,14 +108,30 @@ export const charactersModule = campaignRoutes('campaign-characters')
     const current = await loadCharacter(params.id, params.characterId, userId, role)
     if (!current)
       return status(404, { error: 'Not found' })
+    if (current.level >= 20)
+      return status(422, { error: 'Уже 20 уровень' })
     const updated = await levelUpCharacter(current)
     if (!updated)
-      return status(422, { error: 'Уже 20 уровень' })
+      return status(422, { error: 'Сначала закончи выбор' })
     await broadcast(params.id)
     return toCharacterDto(updated)
   }, {
     member: true,
     params: characterParams,
+  })
+  .post('/:id/characters/:characterId/choice', async ({ userId, params, body, role }) => {
+    const current = await loadCharacter(params.id, params.characterId, userId, role)
+    if (!current)
+      return status(404, { error: 'Not found' })
+    const updated = await resolveCharacterChoice(current, body)
+    if (!updated)
+      return status(422, { error: 'Выбор не подходит' })
+    await broadcast(params.id)
+    return toCharacterDto(updated)
+  }, {
+    member: true,
+    params: characterParams,
+    body: characterChoiceSchema,
   })
   .post('/:id/characters/:characterId/rest', async ({ userId, params, body, role }) => {
     const current = await loadCharacter(params.id, params.characterId, userId, role)

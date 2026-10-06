@@ -1,41 +1,90 @@
-import type { CharacterDto, KnownSpell, SrdEntryDto } from '@dnd/shared'
-import { readClassFeatures } from '@dnd/shared'
-import { ActionIcon, Button, Divider, Group, Modal, NumberInput, Paper, Select, Stack, Text, TextInput } from '@mantine/core'
+import type { CharacterDto, ClassFeature, KnownSpell, SrdEntryDto } from '@dnd/shared'
+import { featuresForSheet } from '@dnd/shared'
+import { ActionIcon, Box, Button, Divider, Group, Modal, NumberInput, Paper, Select, Stack, Text, TextInput } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
 import { srdQuery } from '@/shared/api'
-import { featureUsed, kitError, spellCast, spellsReplaced } from './model'
+import { featureUsed, kitError, resourceSpent, spellCast, spellsReplaced } from './model'
 
 export function ClassKit(props: { sheet: CharacterDto }) {
-  const { entries, error, applyFeature, cast, replaceSpells } = useUnit({
+  const { entries, error, applyFeature, cast, replaceSpells, spend } = useUnit({
     entries: srdQuery.data,
     error: kitError,
     applyFeature: featureUsed,
     cast: spellCast,
     replaceSpells: spellsReplaced,
+    spend: resourceSpent,
   })
   const [open, setOpen] = useState(false)
   const classEntry = (entries ?? []).find(entry => entry.id === props.sheet.classId)
-  const features = classEntry ? readClassFeatures(classEntry.body) : []
-  const subclassName = typeof classEntry?.body.subclassName === 'string' ? classEntry.body.subclassName : ''
+  const subclassEntry = (entries ?? []).find(entry => entry.id === props.sheet.subclassId)
+  const features = featuresForSheet(props.sheet.classId, props.sheet.subclassId, props.sheet.level)
+  const classFeatures = features.filter(feature => !feature.subclass)
+  const subclassFeatures = features.filter(feature => feature.subclass)
+  const feats = (entries ?? []).filter(entry => entry.kind === 'feat' && props.sheet.featIds.includes(entry.id))
   const message = error?.characterId === props.sheet.id ? error.message : ''
   const catalog = (entries ?? []).filter(entry => entry.kind === 'spell')
   const replace = (spells: KnownSpell[]) => replaceSpells({ characterId: props.sheet.id, spells })
+  const title = subclassEntry ? `${classEntry?.name ?? 'Класс'} · ${subclassEntry.name}` : classEntry?.name
   return (
     <Stack gap="sm">
-      <Text size="sm" fw={600}>{subclassName ? `${classEntry?.name ?? 'Класс'} · ${subclassName}` : classEntry?.name}</Text>
-      {features.map(feature => (
-        <Paper key={feature.id} withBorder radius="md" p="xs">
-          <Stack gap={4}>
-            <Text size="sm" fw={600}>{feature.subclass ? `${feature.name} · подкласс` : feature.name}</Text>
-            <Text size="sm" c="dimmed">{feature.text}</Text>
-            <Button size="xs" variant={featureButtonVariant(feature, props.sheet.conditions)} onClick={() => applyFeature({ characterId: props.sheet.id, featureId: feature.id })}>
-              {featureLabel(feature, props.sheet.conditions)}
-            </Button>
-          </Stack>
-        </Paper>
-      ))}
+      <Text size="sm" fw={600}>{title}</Text>
+      {props.sheet.classResources.length > 0 && (
+        <>
+          <Divider label="Ресурсы" labelPosition="left" />
+          {props.sheet.classResources.map(pool => (
+            <Group key={pool.id} gap="xs">
+              <Text size="xs">{pool.name}</Text>
+              {Array.from({ length: pool.max }, (_, index) => (
+                <Box
+                  key={index}
+                  w={12}
+                  h={12}
+                  bg={index < pool.max - pool.spent ? 'blue.6' : 'dark.4'}
+                  style={{ borderRadius: 99 }}
+                />
+              ))}
+              <Button size="xs" variant="light" disabled={pool.spent >= pool.max} onClick={() => spend({ characterId: props.sheet.id, resourceId: pool.id })}>
+                Тратить
+              </Button>
+            </Group>
+          ))}
+        </>
+      )}
+      {props.sheet.weaponMasteries.length > 0 && (
+        <Text size="xs" c="dimmed">{`Мастерство: ${props.sheet.weaponMasteries.join(', ')}`}</Text>
+      )}
+      <FeatureGroup
+        label="Класс"
+        features={classFeatures}
+        sheet={props.sheet}
+        onUse={featureId => applyFeature({ characterId: props.sheet.id, featureId })}
+      />
+      {subclassEntry && subclassFeatures.length > 0 && (
+        <FeatureGroup
+          label="Подкласс"
+          features={subclassFeatures}
+          sheet={props.sheet}
+          onUse={featureId => applyFeature({ characterId: props.sheet.id, featureId })}
+        />
+      )}
+      {subclassEntry && subclassFeatures.length === 0 && (
+        <Text size="sm" c="dimmed">Умения этого подкласса в справочник не входят — смотри Player's Handbook 2024.</Text>
+      )}
+      {feats.length > 0 && (
+        <>
+          <Divider label="Черты" labelPosition="left" />
+          {feats.map(feat => (
+            <Paper key={feat.id} withBorder radius="md" p="xs">
+              <Stack gap={4}>
+                <Text size="sm" fw={600}>{feat.name}</Text>
+                <Text size="sm" c="dimmed">{typeof feat.body.text === 'string' ? feat.body.text : ''}</Text>
+              </Stack>
+            </Paper>
+          ))}
+        </>
+      )}
       <Divider label="Заклинания" labelPosition="left" />
       <Group justify="space-between" wrap="nowrap">
         <Text size="sm" fw={600}>Список</Text>
@@ -241,18 +290,44 @@ function spellTitle(spell: KnownSpell) {
   return spell.level > 0 ? `${spell.name} · ${spell.level} круг` : `${spell.name} · заговор`
 }
 
-function featureButtonVariant(feature: { name: string, formula?: string }, conditions: string[]) {
+function FeatureGroup(props: {
+  label: string
+  features: ClassFeature[]
+  sheet: CharacterDto
+  onUse: (featureId: string) => void
+}) {
+  if (props.features.length === 0)
+    return null
+  return (
+    <>
+      <Divider label={props.label} labelPosition="left" />
+      {props.features.map(feature => (
+        <Paper key={feature.id} withBorder radius="md" p="xs">
+          <Stack gap={4}>
+            <Text size="sm" fw={600}>{`${feature.name} · ${feature.level} ур.`}</Text>
+            <Text size="sm" c="dimmed">{feature.text}</Text>
+            <Button size="xs" variant={featureButtonVariant(feature, props.sheet.featureToggles)} onClick={() => props.onUse(feature.id)}>
+              {featureLabel(feature, props.sheet.featureToggles)}
+            </Button>
+          </Stack>
+        </Paper>
+      ))}
+    </>
+  )
+}
+
+function featureButtonVariant(feature: { id: string, formula?: string }, toggles: string[]) {
   if (feature.formula)
     return 'light' as const
-  if (conditions.includes(feature.name))
+  if (toggles.includes(feature.id))
     return 'filled' as const
   return 'default' as const
 }
 
-function featureLabel(feature: { name: string, formula?: string }, conditions: string[]) {
+function featureLabel(feature: { id: string, formula?: string }, toggles: string[]) {
   if (feature.formula)
     return 'Бросить'
-  if (conditions.includes(feature.name))
+  if (toggles.includes(feature.id))
     return 'Снять'
   return 'Включить'
 }

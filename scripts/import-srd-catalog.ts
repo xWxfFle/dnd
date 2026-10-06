@@ -3,6 +3,8 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { importDndSuClasses } from './import-dndsu-classes'
+import { importHeroes } from './import-srd-heroes'
 
 const open5e = 'https://api.open5e.com/v2'
 const etignisUrl = 'https://raw.githubusercontent.com/Etignis/DnD_SpellList_eng_rus/master/spells/allSpells.js'
@@ -1011,10 +1013,17 @@ const ru = await loadEtignis()
 const { spells, missing } = await importSpells(ru)
 const items = await importItems()
 const monsters = await importMonsters()
+const heroes = await importHeroes(paginate, open5e)
 await mkdir(outDir, { recursive: true })
 await writeFile(path.join(outDir, 'srd-2024-spells.json'), `${JSON.stringify(spells, null, 2)}\n`)
 await writeFile(path.join(outDir, 'srd-2024-items.json'), `${JSON.stringify(items, null, 2)}\n`)
 await writeFile(path.join(outDir, 'srd-2024-monsters.json'), `${JSON.stringify(monsters, null, 2)}\n`)
+await writeFile(path.join(outDir, 'srd-2024-classes.json'), `${JSON.stringify(heroes.classes, null, 2)}\n`)
+await writeFile(path.join(outDir, 'srd-2024-subclasses.json'), `${JSON.stringify(heroes.subclasses, null, 2)}\n`)
+await writeFile(path.join(outDir, 'srd-2024-feats.json'), `${JSON.stringify(heroes.feats, null, 2)}\n`)
+await writeFile(path.join(outDir, 'srd-2024-backgrounds.json'), `${JSON.stringify(heroes.backgrounds, null, 2)}\n`)
+// Классы и подклассы из Open5e англоязычные и покрывают только SRD, поэтому поверх них идёт импорт с dnd.su.
+const dndsu = await importDndSuClasses()
 const latinSpells = missing.filter(name => !spellRuExtra[name.toLowerCase()])
 const latinMonsters = monsters.filter(row => /[a-z]/i.test(row.name)).map(row => `${row.id} | ${row.name}`)
 const latinItems = items.filter(row => /[a-z]/i.test(row.name)).map(row => `${row.id} | ${row.name}`)
@@ -1022,9 +1031,18 @@ console.log(JSON.stringify({
   spells: spells.length,
   items: items.length,
   monsters: monsters.length,
+  classes: dndsu.classes,
+  subclasses: dndsu.subclasses,
+  classFeatures: dndsu.features,
+  subclassFeatures: dndsu.subclassFeatures,
+  dndsuEmptyFields: dndsu.emptyFields,
+  backgrounds: heroes.backgrounds.length,
+  feats: heroes.feats.length,
   missingSpells: latinSpells.slice(0, 40),
   missingSpellCount: latinSpells.length,
   latinMonsters: latinMonsters.slice(0, 40),
   latinMonsterCount: latinMonsters.length,
   latinItems,
+  latinHeroes: heroes.latin.slice(0, 80),
+  latinHeroCount: heroes.latin.length,
 }, null, 2))

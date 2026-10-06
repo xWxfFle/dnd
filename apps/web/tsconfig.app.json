@@ -9,5 +9,5 @@
     "types": ["vite/client"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../../packages/shared/src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../packages/shared/src/**/*.json", "../../packages/shared/src/**/*.ts"]
 }
