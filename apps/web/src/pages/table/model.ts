@@ -1,8 +1,8 @@
-import type { Abilities, Ability, AttackDef, CreatePresetInput, InventoryItem, SaveOverrides, Skill } from '@dnd/shared'
-import { abilityLabel, abilityModifier, d20Formula, formatDiceFormula, gearByItemId, parseDice, readAbilities, readArmorClass, readClassFeatures, readDiceFormula, readSaveOverrides, saveBonus, skills } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, CreatePresetInput, InventoryItem, KnownSpell, SaveOverrides, Skill } from '@dnd/shared'
+import { abilityLabel, abilityModifier, d20Formula, formatDiceFormula, parseDice, readAbilities, readArmorClass, readClassFeatures, readDiceFormula, readInventory, readSaveOverrides, saveBonus, skills, tokenSchema } from '@dnd/shared'
 import { computed, effect, event, reaction, scoped, store } from '@virentia/core'
-import { apiSend, srdQuery } from '@/shared/api'
-import { characterRoute, homeRoute, tableRoute } from '@/shared/routing'
+import { apiRead, apiSend, srdQuery } from '@/shared/api'
+import { homeRoute } from '@/shared/routing'
 import { appScope, readUserId } from '@/shared/session'
 import { readAttacks } from './attacks'
 import { liveSnapshot, sendLiveFx } from './live'
@@ -40,10 +40,7 @@ export const presets = computed(() => liveSnapshot.value?.presets ?? [])
 
 export const roster = computed(() => {
   const snapshot = liveSnapshot.value
-  const characters = snapshot?.characters ?? []
-  if (snapshot?.campaign.role === 'dm')
-    return characters
-  return characters.filter(character => character.kind !== 'custom')
+  return (snapshot?.characters ?? []).filter(character => character.kind === 'hero')
 })
 
 export const sheets = computed(() => {
@@ -123,19 +120,16 @@ export const notesChanged = event<string>()
 export const notesSaveRequested = event<void>()
 export const monsterSelected = event<string>()
 export const monsterCopiesChanged = event<string | number>()
-export const monsterPlaceRequested = event<void>()
+export const monsterPlaceRequested = event<{ copies: number, image?: File }>()
 export const characterPlacementToggled = event<string>()
 export const heroDeletePressed = event<string>()
 export const heroRenamed = event<{ characterId: string, name: string }>()
-export const heroKindChosen = event<{ characterId: string, kind: string }>()
 export const restRequested = event<{ characterId: string, kind: 'short' | 'long' }>()
 export const inspirationToggled = event<string>()
 export const exhaustionAdjusted = event<{ characterId: string, delta: number }>()
 export const deathSaveRecorded = event<{ characterId: string, kind: 'successes' | 'failures' }>()
 export const conditionToggled = event<{ characterId: string, name: string }>()
-export const gearToggled = event<{ characterId: string, id: string }>()
-export const gearAdded = event<{ characterId: string, itemId: string }>()
-export const gearRemoved = event<{ characterId: string, id: string }>()
+export const gearReplaced = event<{ characterId: string, inventory: InventoryItem[] }>()
 export const portraitChosen = event<{ characterId: string, file: File }>()
 export const levelUpRequested = event<string>()
 export const abilityScoreEdited = event<{ characterId: string, ability: Ability, score: number }>()
@@ -143,10 +137,22 @@ export const hpMaxEdited = event<{ characterId: string, hpMax: number }>()
 export const skillProficiencyToggled = event<{ characterId: string, skill: Skill }>()
 export const presetSaved = event<CreatePresetInput>()
 export const presetRemoved = event<string>()
-export const presetSpawned = event<{ presetId: string, copies: number }>()
+export const presetSpawned = event<{ presetId: string, copies: number, image?: File }>()
+export const blankMobPlaced = event<{
+  name: string
+  ac: number
+  hp: number
+  speed: number
+  abilities: Abilities
+  attacks: AttackDef[]
+  copies: number
+  image?: File
+}>()
 export const mapFileChosen = event<File>()
 export const featureUsed = event<{ characterId: string, featureId: string }>()
 export const spellCast = event<{ characterId: string, spellId: string }>()
+export const spellsReplaced = event<{ characterId: string, spells: KnownSpell[] }>()
+export const sheetHpChanged = event<{ characterId: string, delta: number }>()
 export const attackRolled = event<{ attack: AttackDef, kind: AttackRollKind, exhaustion?: number }>()
 export const strikeDeclared = event<{ attack: AttackDef, attackerTokenId: string, targetTokenId: string }>()
 export const formulaChanged = event<string>()
@@ -158,7 +164,6 @@ export const checkRolled = event<CheckMode>()
 export const sheetRollModeChosen = event<SheetRollMode>()
 export const sheetCheckRolled = event<{ label: string, bonus: number, exhaustion: number }>()
 export const campaignsOpened = event<void>()
-export const characterOpened = event<void>()
 export const combatStarted = event<void>()
 export const combatAdvanced = event<void>()
 export const combatEnded = event<void>()
@@ -224,10 +229,7 @@ const rollByKind = {
   }),
 } as const satisfies Record<AttackRollKind, (attack: AttackDef, exhaustion?: number) => { label: string, formula: string, mode: 'normal' | 'crit', exhaustion?: number }>
 
-const heroKindByValue: Record<string, 'hero' | 'custom' | undefined> = {
-  custom: 'custom',
-  hero: 'hero',
-}
+const blankMobAbilities: Abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }
 
 export function bootTableModel() {
   scoped(appScope, () => {
@@ -458,30 +460,18 @@ export function bootTableModel() {
     })
     reaction({
       on: monsterPlaceRequested,
-      async run() {
-        const current = scene.value
-        const base = campaignBase()
+      async run({ copies, image }) {
         const monster = selectedMonster.value
-        if (!current || !base || !monster)
+        if (!monster)
           return
         const hp = Number(monster.body.hp ?? 1)
-        const names = copyNames(monster.name, sceneTokens.value, monster.id, monsterCopies.value)
-        for (const [index, name] of names.entries()) {
-          await commandFx({
-            path: `${base}/scenes/${current.id}/tokens`,
-            method: 'POST',
-            body: {
-              name,
-              x: 1 + (index % 8),
-              y: 1 + Math.floor(index / 8),
-              hpCurrent: hp,
-              hpMax: hp,
-              monsterId: monster.id,
-              hidden: false,
-              ...placedMonster(monster.body),
-            },
-          })
-        }
+        await stampMobTokens({
+          name: monster.name,
+          hp: Number.isFinite(hp) ? hp : 1,
+          copies,
+          image,
+          ...placedMonster(monster.body),
+        })
       },
     })
     reaction({
@@ -520,16 +510,6 @@ export function bootTableModel() {
         if (!next || !sheet || next === sheet.name)
           return
         patchCharacter(characterId, { name: next })
-      },
-    })
-    reaction({
-      on: heroKindChosen,
-      run({ characterId, kind }) {
-        const next = heroKindByValue[kind]
-        const sheet = characterById(characterId)
-        if (!next || !sheet || !dm.value || sheet.userId !== viewerId.value || next === sheet.kind)
-          return
-        patchCharacter(characterId, { kind: next })
       },
     })
     reaction({
@@ -583,48 +563,29 @@ export function bootTableModel() {
       },
     })
     reaction({
-      on: gearToggled,
-      run({ characterId, id }) {
-        const sheet = characterById(characterId)
-        const current = sheet?.inventory.find(item => item.id === id)
-        if (!sheet || !current || current.kind === 'gear')
+      on: gearReplaced,
+      run({ characterId, inventory }) {
+        if (!characterById(characterId))
           return
-        patchCharacter(characterId, {
-          inventory: sheet.inventory.map(item => ({
-            ...item,
-            equipped: equippedAfterToggle(item, current, !current.equipped),
-          })),
-        })
+        patchCharacter(characterId, { inventory: inventory.slice(0, 40) })
       },
     })
     reaction({
-      on: gearAdded,
-      run({ characterId, itemId }) {
-        const sheet = characterById(characterId)
-        const gear = gearByItemId(itemId)
-        if (!sheet || !gear)
+      on: spellsReplaced,
+      run({ characterId, spells }) {
+        if (!characterById(characterId))
           return
-        patchCharacter(characterId, {
-          inventory: [...sheet.inventory, {
-            id: crypto.randomUUID(),
-            itemId,
-            name: gear.name,
-            quantity: 1,
-            kind: gear.stats.kind,
-            equipped: false,
-          }],
-        })
+        patchCharacter(characterId, { spells: spells.slice(0, 80) })
       },
     })
     reaction({
-      on: gearRemoved,
-      run({ characterId, id }) {
+      on: sheetHpChanged,
+      run({ characterId, delta }) {
         const sheet = characterById(characterId)
-        if (!sheet)
+        if (!sheet || (!dm.value && sheet.userId !== viewerId.value))
           return
-        patchCharacter(characterId, {
-          inventory: sheet.inventory.filter(item => item.id !== id || item.kind === 'gear'),
-        })
+        const hpCurrent = Math.min(sheet.hpMax, Math.max(0, sheet.hpCurrent + Math.trunc(delta)))
+        patchCharacter(characterId, { hpCurrent })
       },
     })
     reaction({
@@ -700,34 +661,39 @@ export function bootTableModel() {
     })
     reaction({
       on: presetSpawned,
-      async run({ presetId, copies }) {
-        const current = scene.value
-        const base = campaignBase()
+      async run({ presetId, copies, image }) {
         const preset = presets.value.find(item => item.id === presetId)
-        if (!current || !base || !preset || !dm.value)
+        if (!preset || !dm.value)
           return
-        const count = Math.min(12, Math.max(1, Math.trunc(copies)))
-        const names = copyNames(preset.name, sceneTokens.value, preset.id, count)
-        for (const [index, name] of names.entries()) {
-          await commandFx({
-            path: `${base}/scenes/${current.id}/tokens`,
-            method: 'POST',
-            body: {
-              name,
-              x: 1 + (index % 8),
-              y: 1 + Math.floor(index / 8),
-              hpCurrent: preset.hp,
-              hpMax: preset.hp,
-              color: preset.color,
-              hidden: false,
-              ac: preset.ac,
-              speed: preset.speed,
-              attacks: preset.attacks,
-              abilities: preset.abilities,
-              saves: preset.saves,
-            },
-          })
-        }
+        await stampMobTokens({
+          name: preset.name,
+          hp: preset.hp,
+          ac: preset.ac,
+          speed: preset.speed,
+          attacks: preset.attacks,
+          abilities: preset.abilities,
+          saves: preset.saves,
+          color: preset.color,
+          copies,
+          image,
+        })
+      },
+    })
+    reaction({
+      on: blankMobPlaced,
+      async run(stamp) {
+        if (!dm.value)
+          return
+        await stampMobTokens({
+          name: stamp.name.trim(),
+          hp: stamp.hp,
+          ac: stamp.ac,
+          speed: stamp.speed,
+          attacks: stamp.attacks,
+          abilities: stamp.abilities,
+          copies: stamp.copies,
+          image: stamp.image,
+        })
       },
     })
     reaction({
@@ -767,11 +733,12 @@ export function bootTableModel() {
       on: spellCast,
       run({ characterId, spellId }) {
         const sheet = characterById(characterId)
+        const known = sheet?.spells.find(item => item.id === spellId)
         const spell = (srdQuery.data.value ?? []).find(entry => entry.id === spellId)
-        if (!sheet || !spell)
+        if (!sheet || (!known && !spell))
           return
-        const level = Number(spell.body.level ?? 0)
-        const dice = typeof spell.body.dice === 'string' ? spell.body.dice : ''
+        const level = known?.level ?? Number(spell?.body.level ?? 0)
+        const dice = known?.dice || (typeof spell?.body.dice === 'string' ? spell.body.dice : '')
         if (level > 0) {
           const slots = sheet.slots.map(slot => ({ ...slot }))
           const slot = slots.find(item => item.level >= level && item.spent < item.max)
@@ -787,7 +754,7 @@ export function bootTableModel() {
           kitError.value = null
         }
         if (dice.includes('d'))
-          void sendLiveFx({ type: 'roll', label: spell.name, formula: dice, mode: 'normal' })
+          void sendLiveFx({ type: 'roll', label: known?.name ?? spell?.name ?? 'Заклинание', formula: dice, mode: 'normal' })
       },
     })
     reaction({
@@ -879,14 +846,6 @@ export function bootTableModel() {
       on: campaignsOpened,
       run() {
         void homeRoute.open({})
-      },
-    })
-    reaction({
-      on: characterOpened,
-      run() {
-        const id = tableRoute.params.value.id
-        if (id)
-          void characterRoute.open({ params: { id } })
       },
     })
     reaction({
@@ -1006,14 +965,6 @@ function campaignBase() {
   return id ? `/api/campaigns/${id}` : null
 }
 
-function equippedAfterToggle(item: { id: string, kind: string, equipped: boolean }, current: { id: string, kind: string }, equipped: boolean) {
-  if (item.id === current.id)
-    return equipped
-  if (equipped && item.kind === current.kind && (current.kind === 'armor' || current.kind === 'shield'))
-    return false
-  return item.equipped
-}
-
 function characterById(characterId: string) {
   return liveSnapshot.value?.characters.find(item => item.id === characterId) ?? null
 }
@@ -1038,15 +989,62 @@ function placedMonster(body: Record<string, unknown>) {
     ac: readArmorClass(body) ?? 10,
     speed,
     attacks: readAttacks(body),
-    abilities: readAbilities(body.abilities),
+    abilities: readAbilities(body.abilities) ?? blankMobAbilities,
     saves: readSaveOverrides(body.saves),
+    inventory: readInventory(body.inventory),
   }
 }
 
-function copyNames(base: string, tokens: { name: string, monsterId: string | null }[], monsterId: string, count: number) {
+async function stampMobTokens(stamp: {
+  name: string
+  hp: number
+  ac: number
+  speed: number
+  attacks: AttackDef[]
+  abilities: Abilities | null
+  saves?: SaveOverrides | null
+  inventory?: InventoryItem[]
+  color?: string
+  copies: number
+  image?: File
+}) {
+  const current = scene.value
+  const base = campaignBase()
+  const name = stamp.name.trim()
+  if (!current || !base || !name)
+    return
+  const count = Math.min(12, Math.max(1, Math.trunc(stamp.copies)))
+  const names = copyNames(name, sceneTokens.value, count)
+  for (const [index, label] of names.entries()) {
+    const created = await apiRead(`${base}/scenes/${current.id}/tokens`, tokenSchema, 'POST', {
+      name: label,
+      x: 1 + (index % 8),
+      y: 1 + Math.floor(index / 8),
+      hpCurrent: stamp.hp,
+      hpMax: stamp.hp,
+      hidden: false,
+      color: stamp.color,
+      ac: stamp.ac,
+      speed: stamp.speed,
+      attacks: stamp.attacks,
+      abilities: stamp.abilities,
+      saves: stamp.saves ?? null,
+      inventory: stamp.inventory ?? [],
+    })
+    if (!stamp.image)
+      continue
+    const body = new FormData()
+    body.set('file', stamp.image)
+    await apiSend(`${base}/tokens/${created.id}/image`, 'POST', body)
+  }
+}
+
+function copyNames(base: string, tokens: { name: string }[], count: number) {
   const taken = new Set<number>()
   for (const token of tokens) {
-    if (token.monsterId !== monsterId && !token.name.startsWith(`${base} `) && token.name !== base)
+    if (token.name === base)
+      continue
+    if (!token.name.startsWith(`${base} `))
       continue
     const match = token.name.slice(base.length).match(/^ (\d+)$/)
     if (match)

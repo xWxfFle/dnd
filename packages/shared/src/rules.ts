@@ -408,9 +408,9 @@ export function equipmentSheet(input: {
   attacks: AttackDef[]
   gearOf: (itemId: string) => { name: string, stats: GearStats } | null
 }) {
-  const inventory = settleEquipped(input.inventory.map(item => alignGear(item, input.gearOf(item.itemId))))
+  const inventory = settleEquipped(input.inventory.map(item => alignGear(item, resolvedGear(item, input.gearOf))))
   const armor = inventory.find(item => item.kind === 'armor' && item.equipped)
-  const armorStats = armor ? input.gearOf(armor.itemId)?.stats : null
+  const armorStats = armor ? resolvedGear(armor, input.gearOf)?.stats : null
   const shield = inventory.some(item => item.kind === 'shield' && item.equipped)
   const ac = armorClass({
     abilities: input.abilities,
@@ -421,7 +421,7 @@ export function equipmentSheet(input: {
   const weapons = inventory.flatMap((item) => {
     if (item.kind !== 'weapon' || !item.equipped)
       return []
-    const stats = input.gearOf(item.itemId)?.stats
+    const stats = resolvedGear(item, input.gearOf)?.stats
     if (stats?.kind !== 'weapon')
       return []
     const ability = weaponAbility(input.abilities, stats.ability)
@@ -434,8 +434,10 @@ export function equipmentSheet(input: {
       damageType: stats.damageType,
     }]
   })
-  const spells = input.attacks.filter(attack => attack.id === 'spell')
-  return { inventory, ac, attacks: [...weapons, ...spells] }
+  const kept = input.attacks.filter(attack => !attack.id.startsWith('gear-'))
+  const spells = kept.filter(attack => attack.id === 'spell')
+  const rest = kept.filter(attack => attack.id !== 'spell')
+  return { inventory, ac, attacks: [...rest, ...weapons, ...spells] }
 }
 
 export function monsterEquipment(input: {
@@ -463,6 +465,12 @@ export function monsterEquipment(input: {
   }
 }
 
+const storedGearAbility = {
+  str: 'str',
+  dex: 'dex',
+  finesse: 'finesse',
+} as const satisfies Record<string, GearAbility>
+
 function readInventoryItem(value: unknown): InventoryItem | null {
   if (!value || typeof value !== 'object')
     return null
@@ -472,6 +480,9 @@ function readInventoryItem(value: unknown): InventoryItem | null {
   const kind = typeof item.kind === 'string' && Object.hasOwn(itemKindByKey, item.kind)
     ? itemKindByKey[item.kind as keyof typeof itemKindByKey]
     : 'gear'
+  const ability = typeof item.ability === 'string' && Object.hasOwn(storedGearAbility, item.ability)
+    ? storedGearAbility[item.ability as keyof typeof storedGearAbility]
+    : undefined
   return {
     id: item.id,
     itemId: typeof item.itemId === 'string' ? item.itemId : item.id,
@@ -479,12 +490,46 @@ function readInventoryItem(value: unknown): InventoryItem | null {
     quantity: typeof item.quantity === 'number' ? item.quantity : 1,
     kind,
     equipped: item.equipped === true,
+    dice: readOptionalText(item.dice, 20),
+    damageType: readOptionalText(item.damageType, 40),
+    ability,
+    armorBase: typeof item.armorBase === 'number' ? Math.trunc(item.armorBase) : undefined,
+    dexCap: item.dexCap === null ? null : typeof item.dexCap === 'number' ? Math.trunc(item.dexCap) : undefined,
   }
+}
+
+function readOptionalText(value: unknown, max: number) {
+  if (typeof value !== 'string')
+    return undefined
+  const text = value.trim()
+  if (text.length === 0)
+    return undefined
+  return text.slice(0, max)
+}
+
+function readItemStats(item: InventoryItem): GearStats | null {
+  if (item.kind === 'weapon' && item.dice && item.damageType && item.ability)
+    return { kind: 'weapon', dice: item.dice, damageType: item.damageType, ability: item.ability }
+  if (item.kind === 'armor' && typeof item.armorBase === 'number')
+    return { kind: 'armor', base: item.armorBase, dexCap: item.dexCap ?? null }
+  if (item.kind === 'shield')
+    return { kind: 'shield' }
+  return null
+}
+
+function resolvedGear(item: InventoryItem, gearOf: (itemId: string) => { name: string, stats: GearStats } | null) {
+  const catalog = gearOf(item.itemId)
+  if (catalog)
+    return catalog
+  const stats = readItemStats(item)
+  if (!stats)
+    return null
+  return { name: item.name, stats }
 }
 
 function alignGear(item: InventoryItem, gear: { name: string, stats: GearStats } | null): InventoryItem {
   if (!gear)
-    return { ...item, kind: 'gear', equipped: false }
+    return item
   return { ...item, name: gear.name, kind: gear.stats.kind }
 }
 

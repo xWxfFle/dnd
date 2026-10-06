@@ -1,14 +1,41 @@
-import { Button, Group, Paper, Stack, Text, TextInput, Title } from '@mantine/core'
+import { Alert, Button, Code, CopyButton, Group, Modal, Paper, Stack, Text, TextInput, Title } from '@mantine/core'
+import { IconWifi } from '@tabler/icons-react'
 import { useField } from '@virentia/forms-react'
 import { useUnit } from '@virentia/react'
-import { campaignsQuery, createCampaignMutation, joinMutation } from '@/shared/api'
+import { campaignsQuery, createCampaignMutation, joinMutation, lanHostsQuery } from '@/shared/api'
+import { token } from '@/shared/session'
 import { AccountMenu } from '@/shared/ui/account-menu'
-import { campaignCreateRequested, campaignName, campaignOpened, joinCode, joinRequested } from './model'
+import {
+  campaignCreateRequested,
+  campaignDeleteConfirmed,
+  campaignDeleteDismissed,
+  campaignDeletePending,
+  campaignDeletePressed,
+  campaignName,
+  campaignOpened,
+  joinCode,
+  joinRequested,
+  pendingCampaignDelete,
+} from './model'
 
 export function HomePage() {
   const name = useField(campaignName)
   const code = useField(joinCode)
-  const { campaigns, pending, createRequested, openCampaign, join, joinPending, joinFailed } = useUnit({
+  const {
+    campaigns,
+    pending,
+    createRequested,
+    openCampaign,
+    join,
+    joinPending,
+    joinFailed,
+    sessionToken,
+    pendingDelete,
+    deletePressed,
+    deleteDismissed,
+    deleteConfirmed,
+    deletePending,
+  } = useUnit({
     campaigns: campaignsQuery.data,
     pending: createCampaignMutation.pending,
     createRequested: campaignCreateRequested,
@@ -16,23 +43,23 @@ export function HomePage() {
     join: joinRequested,
     joinPending: joinMutation.pending,
     joinFailed: joinMutation.error,
+    sessionToken: token,
+    pendingDelete: pendingCampaignDelete,
+    deletePressed: campaignDeletePressed,
+    deleteDismissed: campaignDeleteDismissed,
+    deleteConfirmed: campaignDeleteConfirmed,
+    deletePending: campaignDeletePending,
   })
-  const localhost = typeof window !== 'undefined' && window.location.hostname === 'localhost'
+  if (!sessionToken)
+    return null
+  const doomed = campaigns?.find(campaign => campaign.id === pendingDelete) ?? null
   return (
     <Stack maw={720} mx="auto" p="md">
       <Group justify="space-between">
         <Title order={2}>Кампании</Title>
         <AccountMenu />
       </Group>
-      {localhost && (
-        <Paper withBorder p="sm">
-          <Text size="sm">
-            Друзья по localhost не зайдут. В терминале:
-            {' '}
-            <Text span ff="monospace">powershell -File scripts/print-join-url.ps1</Text>
-          </Text>
-        </Paper>
-      )}
+      <LanInvite />
       <Group align="end">
         <TextInput
           label="Код приглашения"
@@ -65,12 +92,69 @@ export function HomePage() {
                   {campaign.inviteCode}
                 </Text>
               </div>
-              <Button onClick={() => openCampaign(campaign.id)}>Открыть</Button>
+              <Group gap="xs">
+                <Button onClick={() => openCampaign(campaign.id)}>Открыть</Button>
+                {campaign.role === 'dm' && (
+                  <Button color="red" variant="light" onClick={() => deletePressed(campaign.id)}>Удалить</Button>
+                )}
+              </Group>
             </Group>
           </Paper>
         ))}
         {campaigns?.length === 0 && <Text c="dimmed">Кампаний пока нет.</Text>}
       </Stack>
+      <Modal opened={doomed != null} onClose={deleteDismissed} title="Удалить кампанию?" centered>
+        <Stack>
+          <Text>
+            {doomed
+              ? `Кампания «${doomed.name}» исчезнет вместе со столом, героями и картами.`
+              : ''}
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => deleteDismissed()}>Оставить</Button>
+            <Button color="red" loading={deletePending} onClick={() => deleteConfirmed()}>Удалить</Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   )
+}
+
+function LanInvite() {
+  const hosts = useUnit(lanHostsQuery.data)
+  if (!onLoopback())
+    return null
+  const urls = lanOrigins(hosts?.hosts ?? [])
+  return (
+    <Alert color="gray" icon={<IconWifi size={16} />} title="Для друзей в той же сети">
+      <Stack gap={8}>
+        <Text size="sm">С localhost они не зайдут. Скопируй адрес и открой стол уже по нему — приглашение подставит его само.</Text>
+        {urls.length === 0 && <Text size="sm" c="dimmed">Адрес в сети пока не нашёлся.</Text>}
+        {urls.map(url => (
+          <Group key={url} gap="xs" wrap="nowrap">
+            <Code>{url}</Code>
+            <CopyButton value={url} timeout={1500}>
+              {({ copied, copy }) => (
+                <Button size="compact-xs" variant="light" onClick={copy}>
+                  {copied ? 'Скопировано' : 'Копировать'}
+                </Button>
+              )}
+            </CopyButton>
+          </Group>
+        ))}
+      </Stack>
+    </Alert>
+  )
+}
+
+function onLoopback() {
+  if (typeof window === 'undefined')
+    return false
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+}
+
+function lanOrigins(hosts: string[]) {
+  const { protocol, port } = window.location
+  const suffix = port ? `:${port}` : ''
+  return hosts.map(host => `${protocol}//${host}${suffix}`)
 }

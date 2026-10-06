@@ -1,5 +1,5 @@
 import type { Abilities, AttackDef, InventoryItem, SaveOverrides } from '@dnd/shared'
-import { readArmorClass, resolveAttack, srdCatalog } from '@dnd/shared'
+import { resolveAttack } from '@dnd/shared'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db'
 import { characters, combatants, combats, scenes, tokens } from '../db/schema'
@@ -115,16 +115,12 @@ async function tokenInCampaign(tokenId: string, campaignId: string) {
   return token
 }
 
-async function armorOf(token: { characterId: string | null, monsterId: string | null, name: string, ac: number | null }) {
+async function armorOf(token: { characterId: string | null, ac: number | null }) {
   if (token.characterId) {
     const [sheet] = await db.select().from(characters).where(eq(characters.id, token.characterId)).limit(1)
     return sheet ? armorFromCharacter(sheet) : null
   }
-  if (token.ac != null)
-    return token.ac
-  const monster = srdCatalog.find(entry => entry.id === token.monsterId)
-    ?? srdCatalog.find(entry => entry.kind === 'monster' && entry.name === token.name)
-  return readArmorClass(monster?.body)
+  return token.ac
 }
 
 async function exhaustionOf(characterId: string) {
@@ -252,7 +248,7 @@ export async function startCombat(sceneId: string, role: 'dm' | 'player') {
   const ordered = board
     .map(token => ({
       token,
-      initiative: Math.floor(Math.random() * 20) + 1 + (token.monsterId ? 2 : 0),
+      initiative: Math.floor(Math.random() * 20) + 1 + (token.characterId ? 0 : 2),
     }))
     .sort((a, b) => b.initiative - a.initiative)
   if (ordered.length > 0) {

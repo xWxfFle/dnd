@@ -1,6 +1,7 @@
-import type { AttackDef, CharacterDto } from '@dnd/shared'
-import { abilityModifier, isDeadFromExhaustion, readArmorClass } from '@dnd/shared'
+import type { AttackDef, CharacterDto, TokenDto } from '@dnd/shared'
+import { abilityModifier, isDeadFromExhaustion } from '@dnd/shared'
 import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput, Divider, Drawer, FileButton, Group, NumberInput, Paper, SegmentedControl, Select, Slider, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
 import { MapBoard } from '@/features/table-map/board'
@@ -19,7 +20,6 @@ import {
   catalogNames,
   cellSize,
   cellSizeChanged,
-  characterOpened,
   characterPlacementToggled,
   columns,
   columnsChanged,
@@ -41,7 +41,6 @@ import {
   gridPresetChosen,
   heroDeleteId,
   heroDeletePressed,
-  heroKindChosen,
   heroRenamed,
   hexFacing,
   hexFacingChanged,
@@ -55,12 +54,6 @@ import {
   mapName,
   mapNameChanged,
   mapWidth,
-  monsterCopies,
-  monsterCopiesChanged,
-  monsterId,
-  monsterPlaceRequested,
-  monsters,
-  monsterSelected,
   notes,
   notesChanged,
   notesSaveRequested,
@@ -78,15 +71,15 @@ import {
   sceneDeletePressed,
   sceneSelected,
   sceneTokens,
-  selectedMonster,
   sheets,
   smoothing,
   smoothingChanged,
   tokenMoved,
+  tokenRemoved,
   viewerId,
 } from './model'
 import { MonsterEdit } from './monster-edit'
-import { PresetPanel } from './preset-panel'
+import { AddMobModal, TemplateList } from './preset-panel'
 
 const tableWash = {
   overflow: 'hidden',
@@ -98,14 +91,11 @@ const panelGlass = {
   backgroundColor: 'light-dark(color-mix(in srgb, white 78%, transparent), color-mix(in srgb, var(--mantine-color-dark-7) 76%, transparent))',
 } as const
 
-const kindMark = { custom: ' · моб', hero: '' } as const satisfies Record<CharacterDto['kind'], string>
-
 export function TablePage() {
   const state = useUnit({
     snapshot: liveSnapshot,
     scene,
     dm,
-    monsters,
     sheets,
     sceneTokens,
     sceneSelected,
@@ -143,7 +133,7 @@ export function TablePage() {
       return
     setTableOpen(false)
     setTokenId(null)
-    setSheetId(currentId => currentId === characterId ? null : characterId)
+    setSheetId(characterId)
   }
   const openCreature = (id: string) => {
     const token = state.sceneTokens.find(item => item.id === id)
@@ -156,7 +146,11 @@ export function TablePage() {
       return
     }
     setSheetId(null)
-    setTokenId(currentId => currentId === id ? null : id)
+    setTokenId(id)
+  }
+  const closeSheet = () => {
+    setSheetId(null)
+    setTokenId(null)
   }
   const openTable = () => {
     setSheetId(null)
@@ -214,13 +208,13 @@ export function TablePage() {
             </div>
           </Paper>
           {(openSheet ?? openToken) && (
-            <Paper withBorder p="sm" style={{ ...panelGlass, position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 2, maxHeight: '42%', overflow: 'auto' }}>
+            <Paper withBorder p="sm" style={{ ...panelGlass, position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 2, maxHeight: '42vh', overflow: 'auto' }}>
+              <Group justify="flex-end" mb="xs">
+                <Button size="xs" variant="subtle" onClick={closeSheet}>Закрыть</Button>
+              </Group>
               {openToken
                 ? (
-                    <MonsterEdit
-                      token={openToken}
-                      monster={state.monsters.find(item => item.id === openToken.monsterId) ?? null}
-                    />
+                    <MonsterEdit token={openToken} />
                   )
                 : openSheet && (
                   <Stack gap="sm">
@@ -228,7 +222,7 @@ export function TablePage() {
                       <Select
                         size="xs"
                         aria-label="Герой"
-                        data={state.sheets.map(item => ({ value: item.id, label: `${item.name}${kindMark[item.kind]}` }))}
+                        data={state.sheets.map(item => ({ value: item.id, label: item.name }))}
                         value={openSheet.id}
                         onChange={setSheetId}
                         allowDeselect={false}
@@ -246,22 +240,39 @@ export function TablePage() {
         </Stack>
         <Stack gap="sm" w={420} h="100%" style={{ flex: 'none', minHeight: 0, overflow: 'hidden' }}>
           <Paper withBorder p="sm" style={{ ...panelGlass, flex: 1, minHeight: 0, overflow: 'auto' }}>
-            <Tabs defaultValue="actors">
+            <Tabs defaultValue={state.dm ? 'heroes' : 'sheets'}>
               <Tabs.List grow>
-                <Tabs.Tab value="actors">Существа</Tabs.Tab>
+                {state.dm
+                  ? (
+                      <>
+                        <Tabs.Tab value="heroes">Герои</Tabs.Tab>
+                        <Tabs.Tab value="mobs">Мобы</Tabs.Tab>
+                      </>
+                    )
+                  : <Tabs.Tab value="sheets">Существа</Tabs.Tab>}
                 <Tabs.Tab value="combat">Бой</Tabs.Tab>
               </Tabs.List>
-              <Tabs.Panel value="actors" pt="sm">
-                {state.dm
-                  ? <ActorsPanel onOpenHero={openHero} onOpenToken={openCreature} />
-                  : <SheetList sheets={state.sheets} onOpen={openHero} />}
-              </Tabs.Panel>
+              {state.dm
+                ? (
+                    <>
+                      <Tabs.Panel value="heroes" pt="sm">
+                        <HeroesPanel onOpenHero={openHero} />
+                      </Tabs.Panel>
+                      <Tabs.Panel value="mobs" pt="sm">
+                        <MobsPanel onOpenToken={openCreature} />
+                      </Tabs.Panel>
+                    </>
+                  )
+                : (
+                    <Tabs.Panel value="sheets" pt="sm">
+                      <SheetList sheets={state.sheets} tokens={state.sceneTokens} onOpen={openHero} />
+                    </Tabs.Panel>
+                  )}
               <Tabs.Panel value="combat" pt="sm">
                 <CombatStrip
                   combat={snapshot.combat}
                   dm={state.dm}
                   tokens={state.sceneTokens}
-                  monsters={state.monsters}
                   characters={snapshot.characters}
                   onOpenSheet={openHero}
                   onOpenToken={openCreature}
@@ -290,17 +301,16 @@ export function TablePage() {
   )
 }
 
-function SheetList(props: { sheets: CharacterDto[], onOpen: (characterId: string) => void }) {
-  const openCharacter = useUnit(characterOpened)
+function SheetList(props: { sheets: CharacterDto[], tokens: { id: string, characterId: string | null }[], onOpen: (characterId: string) => void }) {
   return (
     <Stack gap="sm">
-      <Group justify="flex-end">
-        <Button size="xs" variant="light" onClick={() => void openCharacter()}>Новый герой</Button>
-      </Group>
       {props.sheets.map(sheet => (
-        <Button key={sheet.id} size="xs" variant="subtle" fullWidth onClick={() => props.onOpen(sheet.id)}>
-          {`${sheet.name} · ${sheet.hpCurrent}/${sheet.hpMax}`}
-        </Button>
+        <HeroCard
+          key={sheet.id}
+          character={sheet}
+          tokenId={props.tokens.find(token => token.characterId === sheet.id)?.id ?? null}
+          onOpen={props.onOpen}
+        />
       ))}
     </Stack>
   )
@@ -358,61 +368,43 @@ async function writeClipboard(value: string) {
   return ok
 }
 
-function ActorsPanel(props: { onOpenHero: (characterId: string) => void, onOpenToken: (tokenId: string) => void }) {
+function HeroesPanel(props: { onOpenHero: (characterId: string) => void }) {
   const state = useUnit({
     roster,
     sceneTokens,
-    monsters,
-    monsterId,
-    scene,
-    monsterSelected,
-    characterOpened,
   })
-  const [placeOpen, setPlaceOpen] = useState(false)
-  const sceneReady = Boolean(state.scene)
-  const mobs = state.sceneTokens.filter(token => token.characterId == null)
-  const heroes = state.roster.filter(character => character.kind === 'hero')
-  const customMobs = state.roster.filter(character => character.kind === 'custom')
   return (
     <Stack gap="sm">
-      <Group justify="flex-end" gap="xs">
-        <Button size="xs" variant="light" onClick={() => void state.characterOpened()}>Новый герой</Button>
-        <Button size="xs" variant="light" disabled={!sceneReady} onClick={() => setPlaceOpen(open => !open)}>Новый монстр</Button>
-      </Group>
-      <Text size="xs" fw={700}>Герои</Text>
-      {heroes.map(character => (
-        <CharacterLink key={character.id} character={character} onOpen={props.onOpenHero} />
+      {state.roster.length === 0 && <Text size="xs" c="dimmed">Героев пока нет</Text>}
+      {state.roster.map(character => (
+        <HeroCard
+          key={character.id}
+          character={character}
+          tokenId={state.sceneTokens.find(token => token.characterId === character.id)?.id ?? null}
+          onOpen={props.onOpenHero}
+        />
       ))}
-      <Text size="xs" fw={700}>Кастомные мобы</Text>
-      {customMobs.length === 0
-        ? <Text size="xs" c="dimmed">Нет. На листе своего героя переключи «Кастомный моб».</Text>
-        : customMobs.map(character => (
-            <CharacterLink key={character.id} character={character} onOpen={props.onOpenHero} />
-          ))}
-      <Divider />
-      {sceneReady && (
-        <Collapse expanded={placeOpen}>
-          <Stack gap="xs">
-            <Select
-              aria-label="Поиск монстра"
-              placeholder="Поставить монстра"
-              searchable
-              nothingFoundMessage="Нет такого монстра"
-              data={state.monsters.map(monster => ({ value: monster.id, label: monster.name }))}
-              value={state.monsterId}
-              onChange={value => value && state.monsterSelected(value)}
-              allowDeselect={false}
-            />
-            <MonsterStat />
-          </Stack>
-        </Collapse>
-      )}
-      <Divider />
-      <PresetPanel sceneReady={sceneReady} />
+    </Stack>
+  )
+}
+
+function MobsPanel(props: { onOpenToken: (tokenId: string) => void }) {
+  const state = useUnit({
+    sceneTokens,
+    scene,
+    remove: tokenRemoved,
+  })
+  const [addOpen, setAddOpen] = useState(false)
+  const sceneReady = Boolean(state.scene)
+  const mobs = state.sceneTokens.filter(token => token.characterId == null)
+  return (
+    <Stack gap="sm">
+      <Button size="xs" variant="light" disabled={!sceneReady} onClick={() => setAddOpen(true)}>Добавить моба</Button>
+      <AddMobModal opened={addOpen} onClose={() => setAddOpen(false)} sceneReady={sceneReady} />
+      <TemplateList sceneReady={sceneReady} />
+      {mobs.length === 0 && <Text size="xs" c="dimmed">На сцене нет мобов</Text>}
       {mobs.map(token => (
-        <Button key={token.id} size="xs" variant="subtle" fullWidth onClick={() => props.onOpenToken(token.id)} c={token.hpCurrent <= 0 ? 'red' : undefined}>
-          {`${token.name} · ${token.hpCurrent}/${token.hpMax}${token.hpCurrent <= 0 ? ' · мёртв' : ''}`}
-        </Button>
+        <MobCard key={token.id} token={token} onOpen={props.onOpenToken} onRemove={state.remove} />
       ))}
     </Stack>
   )
@@ -573,7 +565,7 @@ function TableSetup() {
 }
 
 function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady: boolean }) {
-  const { toggle, rest, catalog, rollAttack, tokens, master, viewer, pendingHeroDelete, deleteHero, renameHero, chooseKind, raiseLevel, editHpMax } = useUnit({
+  const { toggle, rest, catalog, rollAttack, tokens, master, viewer, pendingHeroDelete, deleteHero, renameHero, raiseLevel, editHpMax } = useUnit({
     toggle: characterPlacementToggled,
     rest: restRequested,
     catalog: catalogNames,
@@ -584,14 +576,11 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
     pendingHeroDelete: heroDeleteId,
     deleteHero: heroDeletePressed,
     renameHero: heroRenamed,
-    chooseKind: heroKindChosen,
     raiseLevel: levelUpRequested,
     editHpMax: hpMaxEdited,
   })
   const sheet = props.sheet
   const editable = master || sheet.userId === viewer
-  const ownSheet = master && sheet.userId === viewer
-  const deleteLabelByKind = { custom: 'Удалить моба', hero: 'Удалить героя' } as const satisfies Record<CharacterDto['kind'], string>
   const tokenId = tokens.find(token => token.characterId === sheet.id)?.id ?? null
   return (
     <Tabs defaultValue="overview" w="100%">
@@ -604,7 +593,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
       <Tabs.Panel value="overview" pt="sm">
         <Stack gap="sm" align="flex-start">
           <Group gap="sm" wrap="nowrap" align="flex-start">
-            <Avatar key={sheet.avatarUrl ?? sheet.id} src={sheet.avatarUrl ?? undefined} alt="" size="lg" radius="xl" />
+            <Avatar key={sheet.avatarUrl ?? sheet.id} src={sheet.avatarUrl} alt={sheet.name} name={sheet.name} color="gray" variant="light" size="lg" radius="xl" />
             <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
               {editable
                 ? (
@@ -617,16 +606,6 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
                     />
                   )
                 : <Text fw={700}>{sheet.name}</Text>}
-              {ownSheet && (
-                <SegmentedControl
-                  size="xs"
-                  fullWidth
-                  value={sheet.kind}
-                  onChange={kind => chooseKind({ characterId: sheet.id, kind })}
-                  data={[{ label: 'Герой', value: 'hero' }, { label: 'Кастомный моб', value: 'custom' }]}
-                />
-              )}
-              {ownSheet && sheet.kind === 'custom' && <Text size="xs" c="dimmed">Игроки не видят его в списке.</Text>}
               <Text size="sm">{sheetTitle(sheet, catalog)}</Text>
               <Text size="sm">{`КД ${sheet.ac} · ${sheet.speed} фт`}</Text>
               {editable && sheet.level < 20 && (
@@ -649,7 +628,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
           </Group>
           <Stack gap={4} w={360}>
             <HpBar current={sheet.hpCurrent} max={sheet.hpMax} temp={sheet.hpTemp} />
-            {editable && tokenId && <HpAdjust tokenId={tokenId} />}
+            {editable && <HpAdjust tokenId={tokenId} characterId={sheet.id} />}
           </Stack>
           {editable && (
             <Group gap="xs">
@@ -658,7 +637,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
               </Button>
               <PortraitUpload characterId={sheet.id} />
               <Button size="xs" variant={pendingHeroDelete === sheet.id ? 'filled' : 'default'} onClick={() => deleteHero(sheet.id)}>
-                {pendingHeroDelete === sheet.id ? 'Точно удалить' : deleteLabelByKind[sheet.kind]}
+                {pendingHeroDelete === sheet.id ? 'Точно удалить' : 'Удалить героя'}
               </Button>
             </Group>
           )}
@@ -671,36 +650,55 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="attacks" pt="sm">
-        <Stack gap="sm" align="flex-start">
-          <Group align="flex-start" gap="sm">
-            {sheet.attacks.map(attack => (
-              <HeroAttack key={attack.id} attack={attack} exhaustion={sheet.exhaustion} canRoll={editable} onRoll={rollAttack} />
-            ))}
-          </Group>
-          <SlotPips slots={sheet.slots} />
+        <Stack gap="sm">
+          {sheet.attacks.length === 0
+            ? <Text size="sm" c="dimmed">Нет атак</Text>
+            : (
+                <Group align="stretch" gap="sm">
+                  {sheet.attacks.map(attack => (
+                    <HeroAttack key={attack.id} attack={attack} exhaustion={sheet.exhaustion} canRoll={editable} onRoll={rollAttack} />
+                  ))}
+                </Group>
+              )}
+          {sheet.slots.length > 0 && (
+            <>
+              <Divider />
+              <SlotPips slots={sheet.slots} />
+            </>
+          )}
           {editable && (
-            <Accordion variant="contained" maw={520}>
-              <Accordion.Item value="kit">
-                <Accordion.Control>Умения и заклинания</Accordion.Control>
-                <Accordion.Panel>
-                  <ClassKit sheet={sheet} />
-                </Accordion.Panel>
-              </Accordion.Item>
-            </Accordion>
+            <>
+              <Divider />
+              <Accordion variant="contained">
+                <Accordion.Item value="kit">
+                  <Accordion.Control>Умения и заклинания</Accordion.Control>
+                  <Accordion.Panel>
+                    <ClassKit sheet={sheet} />
+                  </Accordion.Panel>
+                </Accordion.Item>
+              </Accordion>
+            </>
           )}
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="gear" pt="sm">
-        <Stack gap="sm" align="flex-start">
+        <Stack gap="sm">
           {editable
             ? <GearList sheet={sheet} />
-            : sheet.inventory.map(item => <Text key={item.id} size="sm">{item.name}</Text>)}
-          {editable && <SheetTrackers sheet={sheet} />}
+            : sheet.inventory.map(item => (
+                <Paper key={item.id} withBorder radius="md" p="xs">
+                  <Text size="sm">{item.name}</Text>
+                </Paper>
+              ))}
           {editable && (
-            <Group gap="xs">
-              <Button size="xs" variant="light" onClick={() => rest({ characterId: sheet.id, kind: 'short' })}>Короткий отдых</Button>
-              <Button size="xs" variant="default" onClick={() => rest({ characterId: sheet.id, kind: 'long' })}>Длинный отдых</Button>
-            </Group>
+            <>
+              <SheetTrackers sheet={sheet} />
+              <Divider label="Отдых" labelPosition="left" />
+              <Group gap="xs">
+                <Button size="xs" variant="light" onClick={() => rest({ characterId: sheet.id, kind: 'short' })}>Короткий отдых</Button>
+                <Button size="xs" variant="default" onClick={() => rest({ characterId: sheet.id, kind: 'long' })}>Длинный отдых</Button>
+              </Group>
+            </>
           )}
         </Stack>
       </Tabs.Panel>
@@ -717,15 +715,19 @@ function HeroAttack(props: {
   const save = /сл\s*\d+/i.test(props.attack.damageType)
   const kind = save ? 'save' : 'attack'
   return (
-    <Stack gap={4} w={260} align="flex-start">
-      <Text size="sm" fw={600}>{props.attack.name}</Text>
-      <Text size="xs" c="dimmed">{attackDetail(props.attack)}</Text>
-      {props.canRoll && (
-        <Button size="xs" variant="default" onClick={() => props.onRoll({ attack: props.attack, kind, exhaustion: props.exhaustion })}>
-          {save ? 'Спасбросок' : 'Бросок'}
-        </Button>
-      )}
-    </Stack>
+    <Paper withBorder radius="md" p="sm" w={240}>
+      <Stack gap={6} justify="space-between" h="100%">
+        <Stack gap={4}>
+          <Text size="sm" fw={600}>{props.attack.name}</Text>
+          <Text size="xs" c="dimmed">{attackDetail(props.attack)}</Text>
+        </Stack>
+        {props.canRoll && (
+          <Button size="xs" variant="default" onClick={() => props.onRoll({ attack: props.attack, kind, exhaustion: props.exhaustion })}>
+            {save ? 'Спасбросок' : 'Бросок'}
+          </Button>
+        )}
+      </Stack>
+    </Paper>
   )
 }
 
@@ -804,13 +806,15 @@ function SheetTrackers(props: { sheet: CharacterDto }) {
     condition: conditionToggled,
   })
   return (
-    <Stack gap="xs">
+    <Stack gap="sm">
+      <Divider label="Вдохновение и истощение" labelPosition="left" />
       <Group gap="xs">
         <Button size="xs" variant={props.sheet.heroicInspiration ? 'filled' : 'light'} onClick={() => inspire(props.sheet.id)}>Вдохновение</Button>
         <Button size="xs" variant="default" onClick={() => exhaust({ characterId: props.sheet.id, delta: -1 })}>Истощение −</Button>
         <Button size="xs" variant="default" onClick={() => exhaust({ characterId: props.sheet.id, delta: 1 })}>Истощение +</Button>
       </Group>
       {isDeadFromExhaustion(props.sheet.exhaustion) && <Text size="sm">Истощение 10: персонаж мёртв</Text>}
+      <Divider label="Спасброски от смерти" labelPosition="left" />
       <Group gap="xs" align="center">
         <Text size="xs">Успехи</Text>
         <SavePips
@@ -827,6 +831,7 @@ function SheetTrackers(props: { sheet: CharacterDto }) {
           onAdd={() => death({ characterId: props.sheet.id, kind: 'failures' })}
         />
       </Group>
+      <Divider label="Состояния" labelPosition="left" />
       <Group gap="xs">
         {conditionNames.map(name => (
           <Button
@@ -889,47 +894,84 @@ function SlotPips(props: { slots: CharacterDto['slots'] }) {
   )
 }
 
-function MonsterStat() {
-  const { monster, copies, changeCopies, place } = useUnit({
-    monster: selectedMonster,
-    copies: monsterCopies,
-    changeCopies: monsterCopiesChanged,
-    place: monsterPlaceRequested,
-  })
-  if (!monster)
-    return null
-  const ac = readArmorClass(monster.body)
-  const hp = typeof monster.body.hp === 'number' ? monster.body.hp : null
-  const speed = typeof monster.body.speed === 'number' ? monster.body.speed : null
+function HeroCard(props: { character: CharacterDto, tokenId: string | null, onOpen: (characterId: string) => void }) {
+  const catalog = useUnit(catalogNames)
+  const hero = props.character
+  const klass = catalog[hero.classId] ?? 'Герой'
   return (
-    <Stack gap={6}>
-      <Text size="sm">{statLine(ac, hp, speed)}</Text>
-      <NumberInput size="xs" label="Сколько" min={1} max={12} allowDecimal={false} value={copies} onChange={changeCopies} />
-      <Button size="xs" variant="light" onClick={() => void place()}>На карту</Button>
-    </Stack>
+    <Paper withBorder radius="md" p="sm">
+      <Group align="flex-start" wrap="nowrap" gap="sm">
+        <Avatar
+          src={hero.avatarUrl}
+          alt={hero.name}
+          name={hero.name}
+          color="gray"
+          variant="light"
+          size={56}
+          radius="md"
+        />
+        <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
+          <Text fw={700} c="yellow.4" truncate="end">{hero.name}</Text>
+          <HpBar current={hero.hpCurrent} max={hero.hpMax} temp={hero.hpTemp} />
+          <Text size="xs" c="dimmed">{`${klass} ${hero.level}`}</Text>
+          <Group gap="md">
+            <Text size="xs">{`КД ${hero.ac}`}</Text>
+            <Text size="xs">{`Скорость ${hero.speed}`}</Text>
+            <Text size="xs">{`Сила ${hero.abilities.str}`}</Text>
+          </Group>
+          <Group justify="space-between" align="flex-end" wrap="nowrap">
+            <HpAdjust tokenId={props.tokenId} characterId={hero.id} />
+            <Button size="xs" variant="light" onClick={() => props.onOpen(hero.id)}>Лист</Button>
+          </Group>
+        </Stack>
+      </Group>
+    </Paper>
   )
 }
 
-function CharacterLink(props: { character: CharacterDto, onOpen: (characterId: string) => void }) {
-  const character = props.character
+function MobCard(props: { token: TokenDto, onOpen: (tokenId: string) => void, onRemove: (tokenId: string) => void }) {
+  const token = props.token
+  const dead = token.hpCurrent <= 0
   return (
-    <Button size="xs" variant="subtle" fullWidth onClick={() => props.onOpen(character.id)}>
-      {`${character.name} · ${character.hpCurrent}/${character.hpMax}`}
-    </Button>
+    <Paper withBorder radius="md" p="sm">
+      <Group align="flex-start" wrap="nowrap" gap="sm">
+        <Avatar
+          src={token.imageUrl}
+          alt={token.name}
+          name={token.name}
+          color="gray"
+          variant="light"
+          size={56}
+          radius="md"
+        />
+        <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
+          <Group justify="space-between" wrap="nowrap" gap="xs">
+            <Text fw={700} c={dead ? 'red' : 'yellow.4'} truncate="end">{token.name}</Text>
+            {token.hidden && <Badge size="xs" variant="outline">скрыт</Badge>}
+          </Group>
+          <HpBar current={token.hpCurrent} max={token.hpMax} />
+          <Group gap="md">
+            {token.ac != null && <Text size="xs">{`КД ${token.ac}`}</Text>}
+            {token.speed != null && <Text size="xs">{`Скорость ${token.speed}`}</Text>}
+            {token.abilities && <Text size="xs">{`Сила ${token.abilities.str}`}</Text>}
+          </Group>
+          <Group justify="space-between" align="flex-end" wrap="nowrap">
+            <HpAdjust tokenId={token.id} characterId={null} />
+            <Group gap="xs" wrap="nowrap">
+              <Button size="xs" variant="light" onClick={() => props.onOpen(token.id)}>Карточка</Button>
+              <ActionIcon size="input-xs" variant="subtle" aria-label="Удалить моба" onClick={() => props.onRemove(token.id)}>
+                <IconTrash size={14} />
+              </ActionIcon>
+            </Group>
+          </Group>
+        </Stack>
+      </Group>
+    </Paper>
   )
 }
 
 function percentLabel(value: number) {
   return `${value}%`
-}
-
-function statLine(ac: number | null, hp: number | null, speed: number | null) {
-  const parts = [
-    ac == null ? '' : `КД ${ac}`,
-    hp == null ? '' : `${hp} хитов`,
-    speed == null ? '' : `${speed} фт`,
-  ].filter(part => part.length > 0)
-  return parts.join(' · ')
 }
 
 function attackDetail(attack: AttackDef) {

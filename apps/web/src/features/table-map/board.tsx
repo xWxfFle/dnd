@@ -674,7 +674,7 @@ function ReachControl(props: { label: string, feet: number, presets: number[], o
   )
 }
 
-function CellMarks(props: { cells: CellPoint[], grid: ReturnType<typeof readBoardGrid>, fill: string }) {
+function CellMarks(props: { cells: CellPoint[], grid: ReturnType<typeof readBoardGrid>, fill: string, stroke?: string }) {
   return (
     <ShapeGroup listening={false}>
       {props.cells.map(point => (
@@ -683,6 +683,8 @@ function CellMarks(props: { cells: CellPoint[], grid: ReturnType<typeof readBoar
           points={cellOutline(props.grid, point.x, point.y)}
           closed
           fill={props.fill}
+          stroke={props.stroke}
+          strokeWidth={props.stroke ? 1 : 0}
           listening={false}
         />
       ))}
@@ -738,18 +740,19 @@ function GridLines(props: { grid: ReturnType<typeof readBoardGrid> }) {
 
 function FogLayer(props: { fog: SceneDto['fog'], grid: ReturnType<typeof readBoardGrid>, dm: boolean }) {
   const fill = props.dm ? 'rgba(5, 3, 10, 0.78)' : '#05040a'
+  const stroke = props.dm ? '#f0d58c' : undefined
   if (props.grid.kind === 'hex')
-    return <CellMarks cells={coveredCells(props.fog, props.grid)} grid={props.grid} fill={fill} />
+    return <CellMarks cells={coveredCells(props.fog, props.grid)} grid={props.grid} fill={fill} stroke={stroke} />
   return (
     <ShapeGroup listening={false}>
       {props.fog.map(polygon => (
-        <FogPatch key={polygon.id} points={polygon.points} grid={props.grid} fill={fill} />
+        <FogPatch key={polygon.id} points={polygon.points} grid={props.grid} fill={fill} stroke={stroke} />
       ))}
     </ShapeGroup>
   )
 }
 
-function FogPatch(props: { points: number[], grid: ReturnType<typeof readBoardGrid>, fill: string }) {
+function FogPatch(props: { points: number[], grid: ReturnType<typeof readBoardGrid>, fill: string, stroke?: string }) {
   const rect = rectOf(props.points)
   if (rect) {
     const shift = gridShift(props.grid)
@@ -760,6 +763,8 @@ function FogPatch(props: { points: number[], grid: ReturnType<typeof readBoardGr
         width={rect.w * props.grid.cellSize}
         height={rect.h * props.grid.cellSize}
         fill={props.fill}
+        stroke={props.stroke}
+        strokeWidth={props.stroke ? 1 : 0}
         listening={false}
       />
     )
@@ -769,6 +774,8 @@ function FogPatch(props: { points: number[], grid: ReturnType<typeof readBoardGr
       points={cellSpaceToPixels(props.grid, props.points)}
       closed
       fill={props.fill}
+      stroke={props.stroke}
+      strokeWidth={props.stroke ? 1 : 0}
       listening={false}
     />
   )

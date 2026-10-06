@@ -1,4 +1,7 @@
-import type { Abilities, ClassFeature, GearAbility, GearStats, SaveOverrides, Skill } from './types'
+import type { ClassFeature, GearAbility, GearStats, Skill } from './types'
+import itemRows from './srd-2024-items.json'
+import monsterRows from './srd-2024-monsters.json'
+import spellRows from './srd-2024-spells.json'
 import { skills } from './types'
 
 export interface SrdSeed {
@@ -170,7 +173,7 @@ const classDrafts: ClassDraft[] = [
     casting: 'wis',
     subclassName: 'Охотник',
     weaponMastery: true,
-    spellIds: ['hunter-mark', 'cure-wounds'],
+    spellIds: ['hunters-mark', 'cure-wounds'],
     features: [
       { id: 'favored-enemy', name: 'Избранный враг', text: 'Преимущество на проверки, чтобы выследить существо.', subclass: false },
       { id: 'colossus-slayer', name: 'Убийца колоссов', text: 'Один раз за ход 1d8, если у цели уже не полные хиты.', formula: '1d8', subclass: true },
@@ -323,85 +326,40 @@ const feats: SrdSeed[] = [
   body: { category, text },
 }))
 
-const spells: SrdSeed[] = [
-  ['fire-bolt', 'Огненный снаряд', 0, '1d10', 'огонь', 'Дальнобойная атака заклинанием.'],
-  ['ray-of-frost', 'Луч холода', 0, '1d8', 'холод', 'Дальнобойная атака. Скорость цели −10 футов.'],
-  ['sacred-flame', 'Священное пламя', 0, '1d8', 'излучение', 'Спасбросок Ловкости.'],
-  ['eldritch-blast', 'Мистический заряд', 0, '1d10', 'сила', 'Дальнобойная атака заклинанием.'],
-  ['cure-wounds', 'Лечение ран', 1, '2d8', 'лечение', 'Касание. Лечит кости + модификатор заклинательной характеристики.'],
-  ['healing-word', 'Лечащее слово', 1, '2d4', 'лечение', 'Бонусное действие, 60 футов.'],
-  ['magic-missile', 'Волшебная стрела', 1, '3d4+3', 'сила', 'Три снаряда, попадание автоматическое.'],
-  ['guiding-bolt', 'Направляющий снаряд', 1, '4d6', 'излучение', 'Дальнобойная атака. Следующая атака по цели с преимуществом.'],
-  ['thunderwave', 'Волна грома', 1, '2d8', 'гром', 'Куб 15 футов. Спасбросок Телосложения.'],
-  ['shield', 'Щит', 1, '', 'защита', 'Реакция. +5 КД до начала вашего следующего хода.'],
-  ['bless', 'Благословение', 1, '1d4', 'поддержка', 'До трёх существ добавляют d4 к атакам и спасброскам.'],
-  ['hunter-mark', 'Метка охотника', 1, '1d6', 'сила', 'Дополнительный урон по отмеченной цели.'],
-  ['hex', 'Сглаз', 1, '1d6', 'некротика', 'Дополнительный урон и помеха одной характеристике.'],
-  ['misty-step', 'Туманный шаг', 2, '', 'телепорт', 'Бонусное действие. Телепорт на 30 футов.'],
-  ['hold-person', 'Удержание личности', 2, '', 'очарование', 'Спасбросок Мудрости, иначе паралич.'],
-  ['fireball', 'Огненный шар', 3, '8d6', 'огонь', 'Сфера 20 футов. Спасбросок Ловкости.'],
-  ['counterspell', 'Контрзаклинание', 3, '', 'ограждение', 'Реакция. Прерывает заклинание.'],
-  ['revivify', 'Оживление', 3, '', 'некромантия', 'Возвращает к жизни существо, умершее в последнюю минуту.'],
-].map(([id, name, level, dice, damageType, text]) => ({
-  id: `spell-${id}`,
+const spells: SrdSeed[] = spellRows.map(row => ({
+  id: `spell-${row.id}`,
   kind: 'spell' as const,
-  name: String(name),
-  body: { level: Number(level), dice, damageType, text },
+  name: row.name,
+  body: {
+    level: row.level,
+    dice: row.dice,
+    text: row.text,
+    school: row.school,
+    classes: row.classes,
+  },
 }))
 
-const monsters: SrdSeed[] = [
-  monster('goblin-warrior', 'Гоблин-воин', 15, 12, 7, [
-    attack('scimitar', 'Скимитар', 4, '1d6', 2, 'рубящий'),
-    attack('shortbow', 'Короткий лук', 4, '1d6', 2, 'колющий'),
-  ], scores(8, 14, 10, 10, 8, 8)),
-  monster('wolf', 'Волк', 13, 11, 2, [
-    attack('bite', 'Укус', 4, '2d4', 2, 'колющий'),
-  ], scores(12, 15, 12, 3, 12, 6)),
-  monster('skeleton', 'Скелет', 13, 13, 2, [
-    attack('shortsword', 'Короткий меч', 4, '1d6', 2, 'колющий'),
-    attack('shortbow', 'Короткий лук', 4, '1d6', 2, 'колющий'),
-  ], scores(10, 14, 15, 6, 8, 5)),
-  monster('zombie', 'Зомби', 8, 15, -2, [
-    attack('slam', 'Удар', 3, '1d6', 1, 'дробящий'),
-  ], scores(13, 6, 16, 3, 6, 5)),
-  monster('guard', 'Стражник', 16, 11, 1, [
-    attack('spear', 'Копьё', 3, '1d6', 1, 'колющий'),
-  ], scores(13, 12, 12, 10, 11, 10)),
-  monster('hobgoblin', 'Хобгоблин-воин', 18, 11, 3, [
-    attack('longsword', 'Длинный меч', 3, '1d8', 1, 'рубящий'),
-  ], scores(13, 12, 12, 10, 10, 9)),
-  monster('owlbear', 'Совомед', 13, 59, 2, [
-    attack('beak', 'Клюв', 7, '1d10', 5, 'колющий'),
-    attack('claws', 'Когти', 7, '2d8', 5, 'рубящий'),
-  ], scores(20, 12, 17, 3, 12, 7)),
-  monster('ogre', 'Огр', 11, 68, 1, [
-    attack('greatclub', 'Палица', 6, '2d8', 4, 'дробящий'),
-  ], scores(19, 8, 16, 5, 7, 7)),
-  monster('dire-wolf', 'Лютый волк', 14, 22, 2, [
-    attack('bite', 'Укус', 5, '1d10', 3, 'колющий'),
-  ], scores(17, 15, 15, 3, 12, 7)),
-  monster('ghoul', 'Упырь', 12, 22, 2, [
-    attack('claws', 'Когти', 4, '2d4', 2, 'рубящий'),
-    { id: 'paralyze', name: 'Паралич укуса', attackBonus: 0, damageDice: '0', damageBonus: 0, damageType: 'спасбросок Телосложения Сл 10' },
-  ], scores(13, 15, 10, 7, 10, 6)),
-]
+const monsters: SrdSeed[] = monsterRows.map(row => ({
+  id: `monster-${row.id}`,
+  kind: 'monster' as const,
+  name: row.name,
+  body: {
+    ac: row.ac,
+    hp: row.hp,
+    speed: row.speed,
+    cr: row.cr,
+    attacks: row.attacks,
+    abilities: row.abilities,
+    saves: row.saves,
+  },
+}))
 
-function attack(id: string, name: string, attackBonus: number, damageDice: string, damageBonus: number, damageType: string) {
-  return { id, name, attackBonus, damageDice, damageBonus, damageType }
-}
-
-function scores(str: number, dex: number, con: number, int: number, wis: number, cha: number): Abilities {
-  return { str, dex, con, int, wis, cha }
-}
-
-function monster(id: string, name: string, ac: number, hp: number, initiative: number, attacks: ReturnType<typeof attack>[], abilities: Abilities, saves: SaveOverrides = {}): SrdSeed {
-  return {
-    id: `monster-${id}`,
-    kind: 'monster',
-    name,
-    body: { ac, hp, initiative, speed: 30, attacks, abilities, saves },
-  }
-}
+const items: SrdSeed[] = itemRows.map(row => ({
+  id: `item-${row.id}`,
+  kind: 'item' as const,
+  name: row.name,
+  body: { ...row.gear, text: row.text },
+}))
 
 const gearAbilityByKey = {
   str: 'str',
@@ -414,31 +372,6 @@ const readGearByKind = {
   armor: readArmorGear,
   shield: readShieldGear,
 } as const
-
-interface ItemDraft {
-  id: string
-  name: string
-  text: string
-  gear: GearStats
-}
-
-const itemDrafts: ItemDraft[] = [
-  { id: 'longsword', name: 'Длинный меч', text: 'Универсальное (1d10). Мастерство: отталкивание.', gear: { kind: 'weapon', dice: '1d8', damageType: 'рубящий', ability: 'str' } },
-  { id: 'shortsword', name: 'Короткий меч', text: 'Лёгкое, фехтовальное. Мастерство: дразнящее.', gear: { kind: 'weapon', dice: '1d6', damageType: 'колющий', ability: 'finesse' } },
-  { id: 'rapier', name: 'Рапира', text: 'Фехтовальное. Мастерство: дразнящее.', gear: { kind: 'weapon', dice: '1d8', damageType: 'колющий', ability: 'finesse' } },
-  { id: 'greataxe', name: 'Секира', text: 'Тяжёлое, двуручное. Мастерство: рассечение.', gear: { kind: 'weapon', dice: '1d12', damageType: 'рубящий', ability: 'str' } },
-  { id: 'shortbow', name: 'Короткий лук', text: 'Дальность 80/320. Мастерство: дразнящее.', gear: { kind: 'weapon', dice: '1d6', damageType: 'колющий', ability: 'dex' } },
-  { id: 'leather', name: 'Кожаный доспех', text: 'КД 11 + Ловкость.', gear: { kind: 'armor', base: 11, dexCap: null } },
-  { id: 'chain-shirt', name: 'Кольчужная рубаха', text: 'КД 13 + Ловкость (макс. 2).', gear: { kind: 'armor', base: 13, dexCap: 2 } },
-  { id: 'shield', name: 'Щит', text: '+2 КД.', gear: { kind: 'shield' } },
-]
-
-const items: SrdSeed[] = itemDrafts.map(draft => ({
-  id: `item-${draft.id}`,
-  kind: 'item' as const,
-  name: draft.name,
-  body: { ...draft.gear, text: draft.text },
-}))
 
 export function readGearBody(body: Record<string, unknown> | null | undefined): GearStats | null {
   if (!body)

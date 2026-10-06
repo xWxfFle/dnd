@@ -5,6 +5,8 @@ export const abilitySchema = z.enum(['str', 'dex', 'con', 'int', 'wis', 'cha'])
 export const skillSchema = z.enum(skills)
 export const itemKindSchema = z.enum(itemKinds)
 
+const gearAbilitySchema = z.enum(['str', 'dex', 'finesse'])
+
 export const inventoryItemSchema = z.object({
   id: z.string(),
   itemId: z.string(),
@@ -12,6 +14,11 @@ export const inventoryItemSchema = z.object({
   quantity: z.number().int(),
   kind: itemKindSchema,
   equipped: z.boolean(),
+  dice: z.string().max(20).optional(),
+  damageType: z.string().max(40).optional(),
+  ability: gearAbilitySchema.optional(),
+  armorBase: z.number().int().min(1).max(30).optional(),
+  dexCap: z.number().int().min(0).max(10).nullable().optional(),
 })
 
 export const skillListSchema = z.array(skillSchema).refine(
@@ -67,6 +74,10 @@ export const authResponseSchema = z.object({
 
 export const meResponseSchema = z.object({ user: userSchema })
 
+export const lanHostsSchema = z.object({
+  hosts: z.array(z.string().min(1)),
+})
+
 export const createCampaignSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
@@ -79,6 +90,10 @@ export const campaignSchema = z.object({
   inviteCode: z.string(),
   role: z.enum(['dm', 'player']),
   createdAt: z.string(),
+})
+
+export const okSchema = z.object({
+  ok: z.literal(true),
 })
 
 export const attackSchema = z.object({
@@ -102,6 +117,8 @@ export const knownSpellSchema = z.object({
   id: z.string(),
   name: z.string(),
   level: z.number().int().min(0).max(9),
+  dice: z.string().max(40).optional(),
+  text: z.string().max(600).optional(),
 })
 
 export const characterSchema = z.object({
@@ -270,6 +287,7 @@ export const createTokenSchema = z.object({
   attacks: z.array(attackSchema).max(8).optional(),
   abilities: abilitiesSchema.nullable().optional(),
   saves: saveOverridesSchema.nullable().optional(),
+  inventory: z.array(inventoryItemSchema).max(40).optional(),
 })
 
 export const updateTokenSchema = z.object({

@@ -1,0 +1,548 @@
+[
+  {
+    "id": "halberd",
+    "name": "Алебарда",
+    "text": "мастерство: рассечение, тяжёлое, досягаемость, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d10",
+      "damageType": "рубящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "war-pick",
+    "name": "Боевая кирка",
+    "text": "мастерство: оглушение, универсальное (1d10)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "колющий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "warhammer",
+    "name": "Боевой молот",
+    "text": "мастерство: отталкивание, универсальное (1d10)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "дробящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "quarterstaff",
+    "name": "Боевой посох",
+    "text": "мастерство: опрокидывание, универсальное (1d8)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "дробящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "battleaxe",
+    "name": "Боевой топор",
+    "text": "мастерство: опрокидывание, универсальное (1d10)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "рубящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "mace",
+    "name": "Булава",
+    "text": "мастерство: оглушение",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "дробящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "glaive",
+    "name": "Глефа",
+    "text": "мастерство: касание, тяжёлое, досягаемость, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d10",
+      "damageType": "рубящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "greatsword",
+    "name": "Двуручный меч",
+    "text": "мастерство: касание, тяжёлое, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "2d6",
+      "damageType": "рубящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "longbow",
+    "name": "Длинный лук",
+    "text": "боеприпасы (Range 150/600; Arrow), тяжёлое, мастерство: замедление, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "longsword",
+    "name": "Длинный меч",
+    "text": "мастерство: оглушение, универсальное (1d10)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "рубящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "dart",
+    "name": "Дротик",
+    "text": "фехтовальное, метательное (Range 20/60), мастерство: дразнящее",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d4",
+      "damageType": "колющий",
+      "ability": "finesse"
+    }
+  },
+  {
+    "id": "club",
+    "name": "Дубинка",
+    "text": "лёгкое, мастерство: замедление",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d4",
+      "damageType": "дробящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "blowgun",
+    "name": "Духовая трубка",
+    "text": "боеприпасы (Range 25/100; Needle), заряжаемое, мастерство: дразнящее",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "dagger",
+    "name": "Кинжал",
+    "text": "фехтовальное, лёгкое, мастерство: засечка, метательное (Range 20/60)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d4",
+      "damageType": "колющий",
+      "ability": "finesse"
+    }
+  },
+  {
+    "id": "whip",
+    "name": "Кнут",
+    "text": "фехтовальное, досягаемость, мастерство: замедление",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d4",
+      "damageType": "рубящий",
+      "ability": "finesse"
+    }
+  },
+  {
+    "id": "leather",
+    "name": "Кожаный доспех",
+    "text": "11 + Dex modifier",
+    "gear": {
+      "kind": "armor",
+      "base": 11,
+      "dexCap": null
+    }
+  },
+  {
+    "id": "ring-mail",
+    "name": "Колечный доспех",
+    "text": "14",
+    "gear": {
+      "kind": "armor",
+      "base": 14,
+      "dexCap": 0
+    }
+  },
+  {
+    "id": "chain-mail",
+    "name": "Кольчуга",
+    "text": "16",
+    "gear": {
+      "kind": "armor",
+      "base": 16,
+      "dexCap": 0
+    }
+  },
+  {
+    "id": "chain-shirt",
+    "name": "Кольчужная рубаха",
+    "text": "13 + Dex modifier (max 2)",
+    "gear": {
+      "kind": "armor",
+      "base": 13,
+      "dexCap": 2
+    }
+  },
+  {
+    "id": "spear",
+    "name": "Копьё",
+    "text": "мастерство: оглушение, метательное (Range 20/60), универсальное (1d8)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "shortbow",
+    "name": "Короткий лук",
+    "text": "боеприпасы (Range 80/320; Arrow), двуручное, мастерство: дразнящее",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "shortsword",
+    "name": "Короткий меч",
+    "text": "фехтовальное, лёгкое, мастерство: дразнящее",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "колющий",
+      "ability": "finesse"
+    }
+  },
+  {
+    "id": "plate",
+    "name": "Латы",
+    "text": "18",
+    "gear": {
+      "kind": "armor",
+      "base": 18,
+      "dexCap": 0
+    }
+  },
+  {
+    "id": "light-crossbow",
+    "name": "Лёгкий арбалет",
+    "text": "боеприпасы (Range 80/320; Bolt), заряжаемое, мастерство: замедление, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "light-hammer",
+    "name": "Лёгкий молот",
+    "text": "лёгкое, мастерство: засечка, метательное (Range 20/60)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d4",
+      "damageType": "дробящий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "javelin",
+    "name": "Метательное копьё",
+    "text": "мастерство: замедление, метательное (Range 30/120)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "maul",
+    "name": "Молот",
+    "text": "тяжёлое, мастерство: опрокидывание, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "2d6",
+      "damageType": "дробящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "morningstar",
+    "name": "Моргенштерн",
+    "text": "мастерство: оглушение",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "колющий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "musket",
+    "name": "Мушкет",
+    "text": "боеприпасы (Range 40/120; Bullet), заряжаемое, мастерство: замедление, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d12",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "splint",
+    "name": "Наборный доспех",
+    "text": "17",
+    "gear": {
+      "kind": "armor",
+      "base": 17,
+      "dexCap": 0
+    }
+  },
+  {
+    "id": "breastplate",
+    "name": "Нагрудник",
+    "text": "14 + Dex modifier (max 2)",
+    "gear": {
+      "kind": "armor",
+      "base": 14,
+      "dexCap": 2
+    }
+  },
+  {
+    "id": "greatclub",
+    "name": "Палица",
+    "text": "мастерство: отталкивание, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "дробящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "lance",
+    "name": "Пика",
+    "text": "тяжёлое, досягаемость, мастерство: опрокидывание, двуручное (unless mounted)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d10",
+      "damageType": "колющий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "pistol",
+    "name": "Пистолет",
+    "text": "боеприпасы (Range 30/90; Bullet), заряжаемое, мастерство: дразнящее",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d10",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "half-plate",
+    "name": "Полулаты",
+    "text": "15 + Dex modifier (max 2)",
+    "gear": {
+      "kind": "armor",
+      "base": 15,
+      "dexCap": 2
+    }
+  },
+  {
+    "id": "sling",
+    "name": "Праща",
+    "text": "боеприпасы (Range 30/120; Bullet), мастерство: замедление",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d4",
+      "damageType": "дробящий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "studded-leather",
+    "name": "Проклёпанный кожаный доспех",
+    "text": "12 + Dex modifier",
+    "gear": {
+      "kind": "armor",
+      "base": 12,
+      "dexCap": null
+    }
+  },
+  {
+    "id": "pike",
+    "name": "Протазан",
+    "text": "тяжёлое, мастерство: отталкивание, досягаемость, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d10",
+      "damageType": "колющий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "rapier",
+    "name": "Рапира",
+    "text": "фехтовальное, мастерство: дразнящее",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "колющий",
+      "ability": "finesse"
+    }
+  },
+  {
+    "id": "hand-crossbow",
+    "name": "Ручной арбалет",
+    "text": "боеприпасы (Range 30/120; Bolt), лёгкое, заряжаемое, мастерство: дразнящее",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "handaxe",
+    "name": "Ручной топор",
+    "text": "лёгкое, метательное (Range 20/60), мастерство: дразнящее",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "рубящий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "greataxe",
+    "name": "Секира",
+    "text": "мастерство: рассечение, тяжёлое, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d12",
+      "damageType": "рубящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "sickle",
+    "name": "Серп",
+    "text": "лёгкое, мастерство: засечка",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d4",
+      "damageType": "рубящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "scimitar",
+    "name": "Скимитар",
+    "text": "фехтовальное, лёгкое, мастерство: засечка",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d6",
+      "damageType": "рубящий",
+      "ability": "finesse"
+    }
+  },
+  {
+    "id": "padded",
+    "name": "Стёганый доспех",
+    "text": "11 + Dex modifier",
+    "gear": {
+      "kind": "armor",
+      "base": 11,
+      "dexCap": null
+    }
+  },
+  {
+    "id": "trident",
+    "name": "Трезубец",
+    "text": "метательное (Range 20/60), мастерство: опрокидывание, универсальное (1d10)",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "heavy-crossbow",
+    "name": "Тяжёлый арбалет",
+    "text": "боеприпасы (Range 100/400; Bolt), тяжёлое, заряжаемое, мастерство: отталкивание, двуручное",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d10",
+      "damageType": "колющий",
+      "ability": "dex"
+    }
+  },
+  {
+    "id": "flail",
+    "name": "Цеп",
+    "text": "мастерство: оглушение",
+    "gear": {
+      "kind": "weapon",
+      "dice": "1d8",
+      "damageType": "дробящий",
+      "ability": "str"
+    }
+  },
+  {
+    "id": "scale-mail",
+    "name": "Чешуйчатый доспех",
+    "text": "14 + Dex modifier (max 2)",
+    "gear": {
+      "kind": "armor",
+      "base": 14,
+      "dexCap": 2
+    }
+  },
+  {
+    "id": "hide",
+    "name": "Шкурный доспех",
+    "text": "12 + Dex modifier (max 2)",
+    "gear": {
+      "kind": "armor",
+      "base": 12,
+      "dexCap": 2
+    }
+  },
+  {
+    "id": "shield",
+    "name": "Щит",
+    "text": "+2 КД.",
+    "gear": {
+      "kind": "shield"
+    }
+  }
+]

@@ -1,11 +1,11 @@
-import type { Abilities, Ability, AttackDef, InventoryItem, ItemKind, SaveOverrides, SrdEntryDto, TokenDto } from '@dnd/shared'
-import { abilities, abilityLabel, abilityModifier, gearByItemId, monsterEquipment, readAbilities, readArmorClass, readSaveOverrides, saveBonus, srdCatalog } from '@dnd/shared'
-import { ActionIcon, Avatar, Button, FileButton, Group, NumberInput, Select, Stack, Tabs, Text, TextInput } from '@mantine/core'
-import { IconTrash } from '@tabler/icons-react'
+import type { Abilities, Ability, AttackDef, InventoryItem, SaveOverrides, TokenDto } from '@dnd/shared'
+import { abilities, abilityLabel, abilityModifier, gearByItemId, monsterEquipment, saveBonus } from '@dnd/shared'
+import { ActionIcon, Avatar, Button, FileButton, Group, NumberInput, Paper, Stack, Tabs, Text, TextInput } from '@mantine/core'
+import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
-import { readAttacks } from './attacks'
 import { HpAdjust, HpBar } from './combat-strip'
+import { GearEditor } from './gear-list'
 import { attackRolled, monsterCheckRolled, tokenHiddenToggled, tokenImageChosen, tokenRemoved, tokenStatsSaved } from './model'
 import { RollModePicker } from './skill-rolls'
 
@@ -30,18 +30,18 @@ interface MonsterDraft {
   inventory: InventoryItem[]
 }
 
-export function MonsterEdit(props: { token: TokenDto, monster: SrdEntryDto | null }) {
+export function MonsterEdit(props: { token: TokenDto }) {
   const { save, chooseImage, toggleHidden, remove } = useUnit({
     save: tokenStatsSaved,
     chooseImage: tokenImageChosen,
     toggleHidden: tokenHiddenToggled,
     remove: tokenRemoved,
   })
-  const [draft, setDraft] = useState(() => draftOf(props.token, props.monster))
+  const [draft, setDraft] = useState(() => draftOf(props.token))
   const [sourceId, setSourceId] = useState(props.token.id)
   if (sourceId !== props.token.id) {
     setSourceId(props.token.id)
-    setDraft(draftOf(props.token, props.monster))
+    setDraft(draftOf(props.token))
   }
   const token = props.token
   const ready = draft.name.trim().length > 0 && draft.attacks.every(attack => attack.name.trim().length > 0 && attack.damageDice.trim().length > 0)
@@ -96,62 +96,23 @@ export function MonsterEdit(props: { token: TokenDto, monster: SrdEntryDto | nul
           <MonsterChecks token={token} draft={draft} setDraft={setDraft} />
         </Tabs.Panel>
         <Tabs.Panel value="attacks" pt="sm">
-          <Group align="flex-start" gap="sm">
+          <Stack gap="sm">
+            {draft.attacks.length === 0 && <Text size="sm" c="dimmed">Нет атак</Text>}
             {draft.attacks.map(attack => (
-              <MonsterAttack key={attack.id} attack={attack} setDraft={setDraft} />
+              <Paper key={attack.id} withBorder radius="md" p="sm">
+                <MonsterAttack attack={attack} setDraft={setDraft} />
+              </Paper>
             ))}
-            <Button size="xs" variant="default" onClick={() => setDraft(current => ({ ...current, attacks: [...current.attacks, blankAttack()] }))}>Атака</Button>
-          </Group>
+            <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => setDraft(current => ({ ...current, attacks: [...current.attacks, blankAttack()] }))}>
+              Атака
+            </Button>
+          </Stack>
         </Tabs.Panel>
         <Tabs.Panel value="gear" pt="sm">
-          <MonsterGear draft={draft} setDraft={setDraft} />
+          <GearEditor inventory={draft.inventory} onChange={inventory => setDraft(current => wearGear(current, inventory))} />
         </Tabs.Panel>
       </Tabs>
       <Button size="xs" variant="light" disabled={!ready} onClick={() => save(savedBody(token.id, draft))}>Сохранить</Button>
-    </Stack>
-  )
-}
-
-const gearKindLabel = {
-  weapon: 'Оружие',
-  armor: 'Броня',
-  shield: 'Щит',
-  gear: 'Вещь',
-} as const satisfies Record<ItemKind, string>
-
-const gearOptions = srdCatalog
-  .filter(entry => entry.kind === 'item')
-  .map(entry => ({ value: entry.id, label: entry.name }))
-
-function MonsterGear(props: {
-  draft: MonsterDraft
-  setDraft: (value: MonsterDraft | ((current: MonsterDraft) => MonsterDraft)) => void
-}) {
-  return (
-    <Stack gap="xs" align="flex-start" w={420}>
-      {props.draft.inventory.map(item => (
-        <Group key={item.id} gap="xs" wrap="nowrap">
-          <Text size="sm" w={180} truncate="end">{item.name}</Text>
-          <Text size="xs" c="dimmed" w={64}>{gearKindLabel[item.kind]}</Text>
-          {item.kind !== 'gear' && (
-            <Button size="compact-xs" variant={item.equipped ? 'light' : 'default'} onClick={() => props.setDraft(current => toggleGear(current, item.id))}>
-              {item.equipped ? 'Снять' : 'Надеть'}
-            </Button>
-          )}
-          <ActionIcon size="sm" variant="subtle" aria-label="Убрать" onClick={() => props.setDraft(current => wearGear(current, current.inventory.filter(entry => entry.id !== item.id)))}>
-            <IconTrash size={14} />
-          </ActionIcon>
-        </Group>
-      ))}
-      <Select
-        w={280}
-        size="xs"
-        aria-label="Добавить предмет"
-        placeholder="Добавить предмет"
-        data={gearOptions}
-        value={null}
-        onChange={value => value && props.setDraft(current => addGear(current, value))}
-      />
     </Stack>
   )
 }
@@ -223,7 +184,7 @@ function MonsterAttack(props: {
   const attack = props.attack
   const save = /сл\s*\d+/i.test(attack.damageType)
   return (
-    <Stack gap={4} w={400} align="flex-start">
+    <Stack gap="xs" align="flex-start">
       <Group gap="xs" wrap="nowrap">
         <TextInput
           size="xs"
@@ -232,7 +193,7 @@ function MonsterAttack(props: {
           value={attack.name}
           onChange={event => patchAttack(props.setDraft, attack.id, { name: event.currentTarget.value })}
         />
-        <ActionIcon size="sm" variant="subtle" aria-label="Убрать атаку" onClick={() => props.setDraft(current => ({ ...current, attacks: current.attacks.filter(item => item.id !== attack.id) }))}>
+        <ActionIcon size="input-xs" variant="subtle" aria-label="Убрать атаку" onClick={() => props.setDraft(current => ({ ...current, attacks: current.attacks.filter(item => item.id !== attack.id) }))}>
           <IconTrash size={14} />
         </ActionIcon>
       </Group>
@@ -274,22 +235,21 @@ function savedBody(tokenId: string, draft: MonsterDraft) {
   }
 }
 
-function draftOf(token: TokenDto, monster: SrdEntryDto | null) {
-  const body = monster?.body
-  const speed = typeof body?.speed === 'number' ? body.speed : 30
-  const attacks = token.attacks.length > 0 ? token.attacks : readAttacks(body ?? {})
-  const catalogAc = readArmorClass(body) ?? token.ac ?? 10
-  const ac = token.ac ?? catalogAc
-  const worn = token.inventory.some(item => (item.kind === 'armor' || item.kind === 'shield') && item.equipped)
+function draftOf(token: TokenDto) {
+  const ac = token.ac ?? 10
+  const wornArmor = token.inventory.some(item => item.kind === 'armor' && item.equipped)
+  const wornShield = token.inventory.some(item => item.kind === 'shield' && item.equipped)
+  const dexBonus = token.abilities ? abilityModifier(token.abilities.dex) : 0
+  const bareAc = wornArmor ? 10 + dexBonus : wornShield ? ac - 2 : ac
   return {
     name: token.name,
     ac,
-    bareAc: worn ? catalogAc : ac,
-    speed: token.speed ?? speed,
+    bareAc,
+    speed: token.speed ?? 30,
     hpMax: token.hpMax,
-    attacks,
-    abilities: token.abilities ?? readAbilities(body?.abilities),
-    saves: token.saves ?? readSaveOverrides(body?.saves),
+    attacks: token.attacks,
+    abilities: token.abilities,
+    saves: token.saves ?? {},
     inventory: token.inventory,
   }
 }
@@ -297,27 +257,6 @@ function draftOf(token: TokenDto, monster: SrdEntryDto | null) {
 function setAc(draft: MonsterDraft, ac: number): MonsterDraft {
   const worn = draft.inventory.some(item => (item.kind === 'armor' || item.kind === 'shield') && item.equipped)
   return { ...draft, ac, bareAc: worn ? draft.bareAc : ac }
-}
-
-function addGear(draft: MonsterDraft, itemId: string): MonsterDraft {
-  const gear = gearByItemId(itemId)
-  if (!gear)
-    return draft
-  return wearGear(draft, [...draft.inventory, {
-    id: crypto.randomUUID(),
-    itemId,
-    name: gear.name,
-    quantity: 1,
-    kind: gear.stats.kind,
-    equipped: false,
-  }])
-}
-
-function toggleGear(draft: MonsterDraft, id: string): MonsterDraft {
-  const current = draft.inventory.find(item => item.id === id)
-  if (!current || current.kind === 'gear')
-    return draft
-  return wearGear(draft, draft.inventory.map(item => item.id === id ? { ...item, equipped: !current.equipped } : item))
 }
 
 function wearGear(draft: MonsterDraft, inventory: InventoryItem[]): MonsterDraft {

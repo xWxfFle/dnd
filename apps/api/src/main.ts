@@ -1,9 +1,10 @@
 import path from 'node:path'
-import { API_VERSION, APP_NAME } from '@dnd/shared'
+import { API_VERSION, APP_NAME, lanHostsSchema } from '@dnd/shared'
 import { cors } from '@elysiajs/cors'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { Elysia, status, ValidationError } from 'elysia'
 import { db } from './db'
+import { listLanHosts } from './lib/lan'
 import { ensureDemoUsers, ensureSrd } from './lib/table'
 import { authModule } from './modules/auth'
 import { campaignsModule } from './modules/campaigns'
@@ -37,6 +38,7 @@ export const app = new Elysia()
     credentials: true,
   }))
   .get('/health', () => ({ status: 'ok' as const, service: 'api' }))
+  .get('/lan', () => ({ hosts: listLanHosts() }), { response: lanHostsSchema })
   .get('/', () => ({ name: APP_NAME, version: API_VERSION }))
   .use(authModule)
   .use(campaignsModule)

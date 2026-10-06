@@ -41,6 +41,8 @@ export interface KnownSpell {
   id: string
   name: string
   level: number
+  dice?: string
+  text?: string
 }
 
 export interface ClassFeature {
@@ -58,7 +60,7 @@ export interface DeathSaves {
 
 export const itemKinds = ['weapon', 'armor', 'shield', 'gear'] as const
 export type ItemKind = (typeof itemKinds)[number]
-export type GearAbility = Ability | 'finesse'
+export type GearAbility = 'str' | 'dex' | 'finesse'
 
 export interface WeaponStats {
   kind: 'weapon'
@@ -86,6 +88,11 @@ export interface InventoryItem {
   quantity: number
   kind: ItemKind
   equipped: boolean
+  dice?: string
+  damageType?: string
+  ability?: GearAbility
+  armorBase?: number
+  dexCap?: number | null
 }
 
 export const abilities = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const

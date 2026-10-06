@@ -15,7 +15,8 @@
     "lint:fix": "eslint . --fix",
     "db:generate": "cd apps/api && bunx drizzle-kit generate",
     "db:migrate": "cd apps/api && bunx drizzle-kit migrate",
-    "db:seed": "bun run apps/api/src/seed.ts"
+    "db:seed": "bun run apps/api/src/seed.ts",
+    "srd:import": "bun run scripts/import-srd-catalog.ts"
   },
   "peerDependencies": {
     "typescript": "^5"

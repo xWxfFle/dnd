@@ -16,6 +16,7 @@ import {
   longRestExhaustion,
   proficiencyBonus,
   readAbilities,
+  readArmorClass,
   readDiceFormula,
   readInventory,
   readSaveOverrides,
@@ -27,7 +28,7 @@ import {
   spellSlotsForClass,
   srdCatalog,
 } from '@dnd/shared'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { db } from '../db'
 import {
   campaignMembers,
@@ -168,27 +169,11 @@ export function toTokenDto(row: TokenRow, characterAvatarPath: string | null = n
   }
 }
 
-export function monsterTokenScores(monsterId: string | null | undefined) {
-  if (!monsterId)
-    return null
-  const entry = srd(monsterId)
-  if (!entry)
-    return null
-  const abilities = readAbilities(entry.body.abilities)
-  if (!abilities)
-    return null
-  return { abilities, saves: readSaveOverrides(entry.body.saves) }
-}
-
 function tokenScores(row: TokenRow) {
   const stored = readAbilities(row.abilities)
-  if (stored)
-    return { abilities: stored, saves: readSaveOverrides(row.saves) }
-  const entry = row.monsterId ? srd(row.monsterId) : null
-  const catalog = readAbilities(entry?.body.abilities)
-  if (!catalog)
+  if (!stored)
     return { abilities: null, saves: null }
-  return { abilities: catalog, saves: readSaveOverrides(entry?.body.saves) }
+  return { abilities: stored, saves: readSaveOverrides(row.saves) }
 }
 
 function tokenImageUrl(row: TokenRow, characterAvatarPath: string | null) {
@@ -227,6 +212,19 @@ function saveProficienciesOf(row: CharacterRow) {
   return asAbilityList(srd(row.classId)?.body.saves)
 }
 
+function knownSpellFromSrd(entry: { id: string, name: string, body: Record<string, unknown> }): CharacterDto['spells'][number] {
+  const level = Number(entry.body.level ?? 0)
+  const dice = typeof entry.body.dice === 'string' ? entry.body.dice : ''
+  const text = typeof entry.body.text === 'string' ? entry.body.text : ''
+  return {
+    id: entry.id,
+    name: entry.name,
+    level: Number.isFinite(level) ? Math.min(9, Math.max(0, Math.trunc(level))) : 0,
+    ...(dice ? { dice } : {}),
+    ...(text ? { text: text.slice(0, 600) } : {}),
+  }
+}
+
 export async function createCharacter(input: {
   campaignId: string
   userId: string
@@ -253,7 +251,6 @@ export async function createCharacter(input: {
   const con = abilityModifier(input.abilities.con)
   const hpMax = Math.max(1, sides + con)
   const speed = Number(species.body.speed ?? 30)
-  const featId = String(background.body.originFeatId ?? '')
   const casting = (classEntry.body.casting as CharacterDto['castingAbility']) ?? null
   const spellAttack = casting
     ? [{
@@ -268,11 +265,7 @@ export async function createCharacter(input: {
   const knownSpells = readSpellIds(classEntry.body)
     .map(id => srd(id))
     .filter((entry): entry is NonNullable<ReturnType<typeof srd>> => entry?.kind === 'spell')
-    .map(entry => ({
-      id: entry.id,
-      name: entry.name,
-      level: Number(entry.body.level ?? 0),
-    }))
+    .map(entry => knownSpellFromSrd(entry))
   const [row] = await db.insert(characters).values({
     campaignId: input.campaignId,
     userId: input.userId,
@@ -293,9 +286,7 @@ export async function createCharacter(input: {
     slots: casting ? [{ level: 1, max: 2, spent: 0 }] : [],
     conditions: [],
     deathSaves: { successes: 0, failures: 0 },
-    inventory: featId
-      ? [{ id: featId, itemId: featId, name: 'Черта происхождения', quantity: 1, kind: 'gear' as const, equipped: false }]
-      : [],
+    inventory: [],
     weaponMasteries: classEntry.body.weaponMastery ? ['отталкивание'] : [],
     hitDie,
     hitDiceRemaining: 1,
@@ -397,6 +388,93 @@ export function toPresetDto(row: PresetRow): CreaturePresetDto {
 export async function listPresets(campaignId: string) {
   const rows = await db.select().from(creaturePresets).where(eq(creaturePresets.campaignId, campaignId))
   return rows.map(toPresetDto)
+}
+
+async function normalizeMobs(campaignId: string) {
+  await bakeCatalogTokens(campaignId)
+  await promoteCustomMobs(campaignId)
+}
+
+async function bakeCatalogTokens(campaignId: string) {
+  const sceneRows = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.campaignId, campaignId))
+  if (sceneRows.length === 0)
+    return
+  const rows = await db.select().from(tokens).where(inArray(tokens.sceneId, sceneRows.map(scene => scene.id)))
+  for (const row of rows) {
+    if (row.characterId || !row.monsterId)
+      continue
+    const entry = srd(row.monsterId)
+    if (!entry)
+      continue
+    const stamp = catalogStamp(entry.body)
+    const abilities = readAbilities(row.abilities)
+    const patch = {
+      ...(row.ac == null ? { ac: stamp.ac } : {}),
+      ...(row.speed == null ? { speed: stamp.speed } : {}),
+      ...(asAttacks(row.attacks).length === 0 ? { attacks: stamp.attacks } : {}),
+      ...(!abilities ? { abilities: stamp.abilities, saves: stamp.saves } : {}),
+      ...(readInventory(row.inventory).length === 0 && stamp.inventory.length > 0 ? { inventory: stamp.inventory } : {}),
+    }
+    if (Object.keys(patch).length === 0)
+      continue
+    await db.update(tokens).set(patch).where(eq(tokens.id, row.id))
+  }
+}
+
+async function promoteCustomMobs(campaignId: string) {
+  const customs = await db.select().from(characters).where(and(eq(characters.campaignId, campaignId), eq(characters.kind, 'custom')))
+  if (customs.length === 0)
+    return
+  const sceneRows = await db.select({ id: scenes.id, active: scenes.active }).from(scenes).where(eq(scenes.campaignId, campaignId))
+  const sceneIds = sceneRows.map(scene => scene.id)
+  const board = sceneIds.length === 0
+    ? []
+    : await db.select().from(tokens).where(inArray(tokens.sceneId, sceneIds))
+  const activeId = sceneRows.find(scene => scene.active)?.id ?? sceneRows[0]?.id
+  for (const sheet of customs) {
+    const gear = gearOfRow(sheet)
+    const stamp = {
+      name: sheet.name,
+      hpCurrent: sheet.hpCurrent,
+      hpMax: sheet.hpMax,
+      characterId: null,
+      ac: gear.ac,
+      speed: sheet.speed,
+      attacks: gear.attacks,
+      abilities: asAbilities(sheet.abilities),
+      inventory: gear.inventory,
+    }
+    const linked = board.filter(token => token.characterId === sheet.id)
+    if (linked.length > 0) {
+      for (const token of linked)
+        await db.update(tokens).set(stamp).where(eq(tokens.id, token.id))
+    }
+    else if (activeId) {
+      await db.insert(tokens).values({
+        sceneId: activeId,
+        x: 1,
+        y: 1,
+        hidden: false,
+        color: '#5c4d7a',
+        ...stamp,
+      })
+    }
+    else {
+      continue
+    }
+    await db.delete(characters).where(eq(characters.id, sheet.id))
+  }
+}
+
+function catalogStamp(body: Record<string, unknown>) {
+  return {
+    ac: readArmorClass(body) ?? 10,
+    speed: typeof body.speed === 'number' ? body.speed : 30,
+    attacks: asAttacks(body.attacks),
+    abilities: readAbilities(body.abilities) ?? { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+    saves: readSaveOverrides(body.saves),
+    inventory: readInventory(body.inventory),
+  }
 }
 
 export async function applyRest(characterId: string, kind: 'short' | 'long') {
@@ -520,6 +598,7 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
     .limit(1)
   if (!member)
     return null
+  await normalizeMobs(campaignId)
   const role = member.role
   const sceneRows = await listScenes(campaignId, role)
   const tokenRows = await listTokens(sceneRows.map(scene => scene.id), role)
@@ -675,6 +754,7 @@ export async function ensureSrd() {
       body: sql`excluded.body`,
     },
   })
+  await db.delete(srdEntries).where(notInArray(srdEntries.id, srdCatalog.map(entry => entry.id)))
 }
 
 export function deadIfExhausted(level: number) {

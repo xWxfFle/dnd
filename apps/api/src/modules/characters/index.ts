@@ -67,6 +67,8 @@ export const charactersModule = campaignRoutes('campaign-characters')
     const { kind, name, ...rest } = body
     const gated = sheetPatchForRole(role, rest)
     const patch: typeof rest & { kind?: 'hero' | 'custom', name?: string } = { ...gated }
+    if (role !== 'dm' && current.userId === userId && typeof rest.hpCurrent === 'number')
+      patch.hpCurrent = Math.min(current.hpMax, Math.max(0, Math.trunc(rest.hpCurrent)))
     if (kind && role === 'dm' && current.userId === userId)
       patch.kind = kind
     if (name != null) {
@@ -77,8 +79,12 @@ export const charactersModule = campaignRoutes('campaign-characters')
     }
     const scored = patch.abilities ? abilitySheet(current, patch.abilities as Abilities) : null
     const geared = patch.inventory && !scored ? gearFields(current, patch.inventory) : null
-    const hpPatch = typeof patch.hpMax === 'number'
-      ? { hpMax: patch.hpMax, hpCurrent: Math.min(current.hpCurrent, patch.hpMax) }
+    const hpMax = typeof patch.hpMax === 'number' ? patch.hpMax : current.hpMax
+    const hpCurrent = typeof patch.hpCurrent === 'number'
+      ? Math.min(hpMax, Math.max(0, Math.trunc(patch.hpCurrent)))
+      : Math.min(current.hpCurrent, hpMax)
+    const hpPatch = typeof patch.hpMax === 'number' || typeof patch.hpCurrent === 'number'
+      ? { hpMax, hpCurrent }
       : null
     const next = {
       ...patch,

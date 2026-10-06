@@ -30,7 +30,7 @@ export function RegisterPage() {
             <TextInput label="Почта" value={email.value} onChange={event => void email.fill(event.currentTarget.value)} error={email.errors} />
             <PasswordInput label="Пароль" value={password.value} onChange={event => void password.fill(event.currentTarget.value)} error={password.errors} />
             <Button type="submit" loading={pending}>Создать</Button>
-            <Link to={loginRoute}>Уже есть вход</Link>
+            <Button variant="default" renderRoot={props => <Link {...props} to={loginRoute} />}>Уже есть вход</Button>
           </Stack>
         </form>
       </Paper>

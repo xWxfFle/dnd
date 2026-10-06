@@ -1,9 +1,8 @@
 import type { LoginInput, RegisterInput } from '@dnd/shared'
-import { authResponseSchema, campaignSchema, characterSchema, diceRollSchema, meResponseSchema, snapshotSchema, srdEntrySchema } from '@dnd/shared'
-import { scoped } from '@virentia/core'
+import { authResponseSchema, campaignSchema, characterSchema, diceRollSchema, lanHostsSchema, meResponseSchema, okSchema, snapshotSchema, srdEntrySchema } from '@dnd/shared'
 import { mutation, query } from '@virentia/net-core'
 import { z } from 'zod'
-import { appScope, currentUser, readToken, token } from './session'
+import { noteUnauthorized, readToken } from './session'
 
 export class ApiError extends Error {}
 
@@ -21,12 +20,8 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
   if (init.body && typeof init.body === 'string' && !headers.has('Content-Type'))
     headers.set('Content-Type', 'application/json')
   const response = await fetch(path, { ...init, headers })
-  if (response.status === 401 && !path.endsWith('/auth/login') && !path.endsWith('/auth/register')) {
-    scoped(appScope, () => {
-      token.value = null
-      currentUser.value = null
-    })
-  }
+  if (response.status === 401 && !path.endsWith('/auth/login') && !path.endsWith('/auth/register'))
+    noteUnauthorized()
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ error: response.statusText }))
     const message = typeof payload.error === 'string' ? payload.error : 'Запрос не прошёл'
@@ -66,6 +61,10 @@ export const meQuery = query({
   handler: () => apiRead('/api/auth/me', meResponseSchema),
 })
 
+export const lanHostsQuery = query({
+  handler: () => apiRead('/api/lan', lanHostsSchema),
+})
+
 export const campaignsQuery = query({
   handler: () => apiRead('/api/campaigns', z.array(campaignSchema)),
 })
@@ -80,6 +79,11 @@ export const snapshotQuery = query({
 
 export const createCampaignMutation = mutation({
   handler: (name: string) => apiRead('/api/campaigns', campaignSchema, 'POST', { name }),
+})
+
+export const deleteCampaignMutation = mutation({
+  handler: (id: string) => apiRead(`/api/campaigns/${id}`, okSchema, 'DELETE'),
+  invalidates: [campaignsQuery],
 })
 
 export const joinMutation = mutation({

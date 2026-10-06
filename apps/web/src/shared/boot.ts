@@ -14,14 +14,15 @@ import {
   createCampaignMutation,
   createCharacterMutation,
   joinMutation,
+  lanHostsQuery,
   loginMutation,
   meQuery,
   registerMutation,
   snapshotQuery,
   srdQuery,
 } from './api'
-import { characterRoute, homeRoute, joinRoute, loginRoute, tableRoute } from './routing'
-import { appScope, currentUser, token } from './session'
+import { characterRoute, homeRoute, joinRoute, loginRoute, registerRoute, tableRoute } from './routing'
+import { appScope, currentUser, signedOut, token } from './session'
 
 export const loginForm = createForm({
   schema: {
@@ -157,7 +158,14 @@ export function bootClient() {
         void tableRoute.open({ params: { id: character.campaignId }, replace: true })
       },
     })
-    trigger(campaignsQuery, { on: homeRoute.opened })
+    trigger(campaignsQuery, {
+      on: homeRoute.opened,
+      filter: () => Boolean(token.value),
+    })
+    trigger(lanHostsQuery, {
+      on: homeRoute.opened,
+      filter: () => Boolean(token.value),
+    })
     trigger(srdQuery, { on: [characterRoute.opened, tableRoute.opened] })
     trigger(snapshotQuery, {
       on: [tableRoute.opened, characterRoute.opened],
@@ -170,7 +178,14 @@ export function bootClient() {
         currentUser.value = result.user
       },
     })
-    if (token.value && !currentUser.value)
+    reaction({
+      on: signedOut,
+      run() {
+        if (!loginRoute.isOpened.value && !registerRoute.isOpened.value)
+          void loginRoute.open({ replace: true })
+      },
+    })
+    if (token.value)
       void meQuery(undefined)
     reaction({
       on: joinRoute.opened,

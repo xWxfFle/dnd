@@ -1,4 +1,4 @@
-import { Button, Group, Paper, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core'
+import { Button, Group, Paper, PasswordInput, Stack, TextInput, Title } from '@mantine/core'
 import { useField, useForm } from '@virentia/forms-react'
 import { useUnit } from '@virentia/react'
 import { Link } from '@virentia/router-react'
@@ -18,7 +18,6 @@ export function LoginPage() {
         <Title order={2}>Стол D&D</Title>
         <AccountMenu />
       </Group>
-      <Text c="dimmed">Вход в кампанию. Голос остаётся в Discord.</Text>
       <Paper withBorder p="md">
         <form onSubmit={(event) => {
           event.preventDefault()
@@ -29,7 +28,7 @@ export function LoginPage() {
             <TextInput label="Почта" value={email.value} onChange={event => void email.fill(event.currentTarget.value)} error={email.errors} />
             <PasswordInput label="Пароль" value={password.value} onChange={event => void password.fill(event.currentTarget.value)} error={password.errors} />
             <Button type="submit" loading={pending}>Войти</Button>
-            <Link to={registerRoute}>Регистрация</Link>
+            <Button variant="default" renderRoot={props => <Link {...props} to={registerRoute} />}>Регистрация</Button>
           </Stack>
         </form>
       </Paper>

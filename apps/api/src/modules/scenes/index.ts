@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { db } from '../../db'
 import { characters, scenes, tokens } from '../../db/schema'
 import { activateScene, changeTokenHp, deleteScene, endCombat, moveToken, placeCharacterToken, removeCharacterToken, replaceFog, setTokenHidden, startCombat, updateTokenStats } from '../../lib/combat'
-import { monsterTokenScores, toSceneDto, toTokenDto } from '../../lib/table'
+import { toSceneDto, toTokenDto } from '../../lib/table'
 import { rejectUnlessImage, uploadName, writeUpload } from '../../lib/uploads'
 import { broadcast } from '../../live/hub'
 import { campaignRoutes } from '../../plugins/campaign-access'
@@ -111,7 +111,6 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     body: imageBody,
   })
   .post('/:id/scenes/:sceneId/tokens', async ({ params, body }) => {
-    const copied = monsterTokenScores(body.monsterId)
     const [token] = await db.insert(tokens).values({
       sceneId: params.sceneId,
       name: body.name,
@@ -127,8 +126,9 @@ export const scenesModule = campaignRoutes('campaign-scenes')
       ac: body.ac ?? null,
       speed: body.speed ?? null,
       attacks: body.attacks ?? [],
-      abilities: body.abilities ?? copied?.abilities ?? null,
-      saves: body.saves ?? copied?.saves ?? null,
+      abilities: body.abilities ?? null,
+      saves: body.saves ?? null,
+      inventory: body.inventory ?? [],
     }).returning()
     await broadcast(params.id)
     return toTokenDto(token)

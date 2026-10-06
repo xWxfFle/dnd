@@ -73,6 +73,22 @@ export const campaignsModule = new Elysia({ prefix: '/campaigns', name: 'campaig
       404: errorSchema,
     },
   })
+  .delete('/:id', async ({ userId, params }) => {
+    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, params.id)).limit(1)
+    if (!campaign)
+      return status(404, { error: 'Not found' })
+    if (campaign.ownerId !== userId)
+      return status(403, { error: 'Удаляет только владелец' })
+    await db.delete(campaigns).where(eq(campaigns.id, params.id))
+    return { ok: true as const }
+  }, {
+    params: idParams,
+    response: {
+      200: z.object({ ok: z.literal(true) }),
+      403: errorSchema,
+      404: errorSchema,
+    },
+  })
   .use(campaignRoutes('campaign-table')
     .get('/:id/snapshot', async ({ userId, params }) => {
       const snapshot = await buildSnapshot(userId, params.id)
