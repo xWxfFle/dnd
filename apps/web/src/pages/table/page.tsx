@@ -1,5 +1,5 @@
 import type { AttackDef, CharacterDto, TokenDto } from '@dnd/shared'
-import { abilities, abilityLabel, abilityModifier, imageLimitMb, isDeadFromExhaustion } from '@dnd/shared'
+import { abilities, abilityLabel, imageLimitMb } from '@dnd/shared'
 import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput, Divider, Drawer, FileButton, Group, Modal, NumberInput, Paper, SegmentedControl, Select, Slider, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
@@ -12,24 +12,22 @@ import { DiceLog, DiceTray } from '@/pages/table/dice-tray'
 import { GearList } from '@/pages/table/gear-list'
 import { liveSnapshot } from '@/pages/table/live'
 import { SkillRolls } from '@/pages/table/skill-rolls'
-import { srdQuery } from '@/shared/api'
+import { srdKitQuery } from '@/shared/api'
 import { AccountMenu } from '@/shared/ui/account-menu'
 import {
   abilityScoreEdited,
   attackRolled,
+  campaignMembers,
   campaignsOpened,
   catalogNames,
   cellSize,
   cellSizeChanged,
-  characterPlacementToggled,
   columns,
   columnsChanged,
   conditionNames,
   conditionToggled,
   confirmDelete,
-  deathSaveRecorded,
   dm,
-  exhaustionAdjusted,
   fieldPresets,
   fogUpdated,
   gridApplyRequested,
@@ -41,24 +39,17 @@ import {
   gridOpacityChanged,
   gridPresetChosen,
   heroCreateRequested,
-  heroDeleteId,
-  heroDeletePressed,
-  heroNotesSaved,
-  heroRenamed,
   hexFacing,
   hexFacingChanged,
-  hpMaxEdited,
-  hpTempEdited,
   imageScale,
   imageScaleChanged,
-  inspirationToggled,
   levelChoiceSubmitted,
-  levelUpRequested,
   mapFileChosen,
   mapMeasured,
   mapName,
   mapNameChanged,
   mapWidth,
+  mobPickerOpened,
   notes,
   notesChanged,
   notesSaveRequested,
@@ -66,7 +57,6 @@ import {
   offsetXChanged,
   offsetY,
   offsetYChanged,
-  portraitChosen,
   restRequested,
   roster,
   rows,
@@ -84,7 +74,10 @@ import {
   viewerId,
 } from './model'
 import { MonsterEdit } from './monster-edit'
+import { ownerCaption } from './owner'
+import { OwnerMark } from './owner-mark'
 import { AddMobModal, TemplateList } from './preset-panel'
+import { SheetOverview } from './sheet-overview'
 
 const tableWash = {
   overflow: 'hidden',
@@ -105,9 +98,8 @@ export function TablePage() {
     sceneTokens,
     sceneSelected,
     campaignsOpened,
-    tokenMoved,
-    fogUpdated,
-    mapMeasured,
+    members: campaignMembers,
+    viewer: viewerId,
   })
   const [focusToken, setFocusToken] = useState<{ x: number, y: number, tick: number } | null>(null)
   const [sheetId, setSheetId] = useState<string | null>(null)
@@ -171,24 +163,24 @@ export function TablePage() {
           <Title order={4} lineClamp={1}>{snapshot.campaign.name}</Title>
           <Badge variant="light" size="sm">{state.dm ? 'Мастер' : 'Игрок'}</Badge>
         </Group>
-        {state.dm
-          ? (
-              <Select
-                size="xs"
-                aria-label="Карта"
-                data={snapshot.scenes.map(item => ({ value: item.id, label: item.name }))}
-                value={current?.id ?? null}
-                onChange={(value) => {
-                  if (value)
-                    state.sceneSelected(value)
-                }}
-                allowDeselect={false}
-                w={180}
-              />
-            )
-          : <Text size="sm" lineClamp={1}>{current?.name ?? 'Нет сцены'}</Text>}
         <Group gap="xs" wrap="nowrap">
-          <InviteCopy value={invite} />
+          {state.dm
+            ? (
+                <Select
+                  size="xs"
+                  aria-label="Карта"
+                  data={snapshot.scenes.map(item => ({ value: item.id, label: item.name }))}
+                  value={current?.id ?? null}
+                  onChange={(value) => {
+                    if (value)
+                      state.sceneSelected(value)
+                  }}
+                  allowDeselect={false}
+                  w={180}
+                />
+              )
+            : <Text size="sm" lineClamp={1}>{current?.name ?? 'Нет сцены'}</Text>}
+          {state.dm && snapshot.campaign.inviteCode ? <InviteCopy value={invite} /> : null}
           {state.dm && <Button size="xs" variant="light" onClick={openTable}>Стол</Button>}
           <AccountMenu />
         </Group>
@@ -197,19 +189,7 @@ export function TablePage() {
         <Stack gap="sm" style={{ flex: 1, height: '100%', minWidth: 0, minHeight: 0, position: 'relative' }}>
           <Paper withBorder p={0} style={{ ...panelGlass, flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
             <div style={{ position: 'absolute', inset: 8 }}>
-              {current
-                ? (
-                    <MapBoard
-                      scene={current}
-                      tokens={state.sceneTokens}
-                      dm={state.dm}
-                      focusToken={focusToken}
-                      onTokenMoved={state.tokenMoved}
-                      onFogUpdated={fog => void state.fogUpdated({ sceneId: current.id, fog })}
-                      onMapMeasured={state.mapMeasured}
-                    />
-                  )
-                : <Text>Нет сцены</Text>}
+              <TableMap focusToken={focusToken} />
             </div>
           </Paper>
           {(openSheet ?? openToken) && (
@@ -227,7 +207,10 @@ export function TablePage() {
                       <Select
                         size="xs"
                         aria-label="Герой"
-                        data={state.sheets.map(item => ({ value: item.id, label: item.name }))}
+                        data={state.sheets.map(item => ({
+                          value: item.id,
+                          label: `${item.name} · ${ownerCaption(item.userId, state.viewer, state.members)}`,
+                        }))}
                         value={openSheet.id}
                         onChange={setSheetId}
                         allowDeselect={false}
@@ -307,8 +290,11 @@ export function TablePage() {
 }
 
 function SheetList(props: { sheets: CharacterDto[], tokens: { id: string, characterId: string | null }[], onOpen: (characterId: string) => void }) {
+  const createHero = useUnit(heroCreateRequested)
   return (
     <Stack gap="sm">
+      <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void createHero()}>Новый герой</Button>
+      {props.sheets.length === 0 && <Text size="xs" c="dimmed">Героев пока нет</Text>}
       {props.sheets.map(sheet => (
         <HeroCard
           key={sheet.id}
@@ -318,6 +304,30 @@ function SheetList(props: { sheets: CharacterDto[], tokens: { id: string, charac
         />
       ))}
     </Stack>
+  )
+}
+
+function TableMap(props: { focusToken: { x: number, y: number, tick: number } | null }) {
+  const state = useUnit({
+    scene,
+    dm,
+    sceneTokens,
+    tokenMoved,
+    fogUpdated,
+    mapMeasured,
+  })
+  if (!state.scene)
+    return <Text>Нет сцены</Text>
+  return (
+    <MapBoard
+      scene={state.scene}
+      tokens={state.sceneTokens}
+      dm={state.dm}
+      focusToken={props.focusToken}
+      onTokenMoved={state.tokenMoved}
+      onFogUpdated={state.fogUpdated}
+      onMapMeasured={state.mapMeasured}
+    />
   )
 }
 
@@ -400,13 +410,24 @@ function MobsPanel(props: { onOpenToken: (tokenId: string) => void }) {
     sceneTokens,
     scene,
     remove: tokenRemoved,
+    openPicker: mobPickerOpened,
   })
   const [addOpen, setAddOpen] = useState(false)
   const sceneReady = Boolean(state.scene)
   const mobs = state.sceneTokens.filter(token => token.characterId == null)
   return (
     <Stack gap="sm">
-      <Button size="xs" variant="light" disabled={!sceneReady} onClick={() => setAddOpen(true)}>Добавить моба</Button>
+      <Button
+        size="xs"
+        variant="light"
+        disabled={!sceneReady}
+        onClick={() => {
+          state.openPicker()
+          setAddOpen(true)
+        }}
+      >
+        Добавить моба
+      </Button>
       <AddMobModal opened={addOpen} onClose={() => setAddOpen(false)} sceneReady={sceneReady} />
       <TemplateList sceneReady={sceneReady} />
       {mobs.length === 0 && <Text size="xs" c="dimmed">На сцене нет мобов</Text>}
@@ -572,25 +593,14 @@ function TableSetup() {
 }
 
 function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady: boolean }) {
-  const { toggle, rest, catalog, rollAttack, tokens, master, viewer, pendingHeroDelete, deleteHero, renameHero, raiseLevel, editHpMax, editHpTemp, saveNotes } = useUnit({
-    toggle: characterPlacementToggled,
+  const { rest, rollAttack, master, viewer } = useUnit({
     rest: restRequested,
-    catalog: catalogNames,
     rollAttack: attackRolled,
-    tokens: sceneTokens,
     master: dm,
     viewer: viewerId,
-    pendingHeroDelete: heroDeleteId,
-    deleteHero: heroDeletePressed,
-    renameHero: heroRenamed,
-    raiseLevel: levelUpRequested,
-    editHpMax: hpMaxEdited,
-    editHpTemp: hpTempEdited,
-    saveNotes: heroNotesSaved,
   })
   const sheet = props.sheet
   const editable = master || sheet.userId === viewer
-  const tokenId = tokens.find(token => token.characterId === sheet.id)?.id ?? null
   return (
     <Tabs defaultValue="overview" w="100%">
       <Tabs.List grow>
@@ -600,88 +610,19 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
         <Tabs.Tab value="gear">Снаряжение</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="overview" pt="sm">
-        <Stack gap="sm" align="flex-start">
-          <Group gap="sm" wrap="nowrap" align="flex-start">
-            <Avatar key={sheet.avatarUrl ?? sheet.id} src={sheet.avatarUrl} alt={sheet.name} name={sheet.name} color="gray" variant="light" size="lg" radius="xl" />
-            <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-              {editable
-                ? (
-                    <TextInput
-                      key={`${sheet.id}:${sheet.name}`}
-                      size="xs"
-                      aria-label="Имя"
-                      defaultValue={sheet.name}
-                      onBlur={event => renameHero({ characterId: sheet.id, name: event.currentTarget.value })}
-                    />
-                  )
-                : <Text fw={700}>{sheet.name}</Text>}
-              <Text size="sm">{sheetTitle(sheet, catalog)}</Text>
-              <Text size="sm">{`КД ${sheet.ac} · ${sheet.speed} фт`}</Text>
-              {editable && sheet.level < 20 && !sheet.pendingChoice && (
-                <Button size="xs" variant="light" onClick={() => raiseLevel(sheet.id)}>Новый уровень</Button>
-              )}
-              {master && (
-                <NumberInput
-                  key={`${sheet.id}:${sheet.hpMax}`}
-                  size="xs"
-                  w={120}
-                  label="Максимум хитов"
-                  min={1}
-                  max={999}
-                  allowDecimal={false}
-                  defaultValue={sheet.hpMax}
-                  onBlur={event => editHpMax({ characterId: sheet.id, hpMax: readInt(event.currentTarget.value, sheet.hpMax) })}
-                />
-              )}
-            </Stack>
-          </Group>
-          <Stack gap={4} w={360}>
-            <HpBar current={sheet.hpCurrent} max={sheet.hpMax} temp={sheet.hpTemp} />
-            {editable && <HpAdjust tokenId={tokenId} characterId={sheet.id} />}
-            {editable && (
-              <NumberInput
-                key={`${sheet.id}:${sheet.hpTemp}`}
-                size="xs"
-                w={120}
-                label="Временные хиты"
-                min={0}
-                max={999}
-                hideControls
-                allowDecimal={false}
-                defaultValue={sheet.hpTemp}
-                onBlur={event => editHpTemp({ characterId: sheet.id, hpTemp: readInt(event.currentTarget.value, sheet.hpTemp) })}
-              />
-            )}
-          </Stack>
-          {editable && <LevelChoiceModal sheet={sheet} />}
-          {editable && (
-            <Textarea
-              key={`${sheet.id}:notes`}
-              size="xs"
-              w={360}
-              label="Заметки"
-              minRows={2}
-              defaultValue={sheet.notes}
-              onBlur={event => saveNotes({ characterId: sheet.id, notes: event.currentTarget.value })}
-            />
-          )}
-          {editable && (
-            <Group gap="xs">
-              <Button size="xs" variant={props.onMap ? 'default' : 'light'} disabled={!props.sceneReady} onClick={() => toggle(sheet.id)}>
-                {props.onMap ? 'Убрать с карты' : 'На карту'}
-              </Button>
-              <PortraitUpload characterId={sheet.id} />
-              <Button size="xs" variant={pendingHeroDelete === sheet.id ? 'filled' : 'default'} onClick={() => deleteHero(sheet.id)}>
-                {pendingHeroDelete === sheet.id ? 'Точно удалить' : 'Удалить героя'}
-              </Button>
-            </Group>
-          )}
-        </Stack>
+        <SheetOverview
+          sheet={sheet}
+          onMap={props.onMap}
+          sceneReady={props.sceneReady}
+          editable={editable}
+          master={master}
+        />
+        {editable && <LevelChoiceModal sheet={sheet} />}
       </Tabs.Panel>
       <Tabs.Panel value="checks" pt="sm">
         <Stack gap="sm" align="flex-start">
-          <AbilityScores sheet={sheet} master={master} />
-          {editable && <SkillRolls sheet={sheet} />}
+          {master && <AbilityEditors sheet={sheet} />}
+          <SkillRolls sheet={sheet} canRoll={editable} />
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="attacks" pt="sm">
@@ -727,7 +668,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
               ))}
           {editable && (
             <>
-              <SheetTrackers sheet={sheet} />
+              <ConditionTrackers sheet={sheet} />
               <Divider label="Отдых" labelPosition="left" />
               <Group gap="xs">
                 <Button size="xs" variant="light" onClick={() => rest({ characterId: sheet.id, kind: 'short' })}>Короткий отдых</Button>
@@ -766,17 +707,6 @@ function HeroAttack(props: {
   )
 }
 
-const abilityShort = {
-  str: 'Сил',
-  dex: 'Лов',
-  con: 'Тел',
-  int: 'Инт',
-  wis: 'Мдр',
-  cha: 'Хар',
-} as const satisfies Record<keyof CharacterDto['abilities'], string>
-
-const abilityOrder = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
-
 const pendingTitle = {
   asi: 'Увеличение характеристик',
   subclass: 'Подкласс',
@@ -786,7 +716,7 @@ const pendingTitle = {
 function LevelChoiceModal(props: { sheet: CharacterDto }) {
   const { submit, entries } = useUnit({
     submit: levelChoiceSubmitted,
-    entries: srdQuery.data,
+    entries: srdKitQuery.data,
   })
   const pending = props.sheet.pendingChoice
   const [bonuses, setBonuses] = useState({ str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 })
@@ -805,8 +735,10 @@ function LevelChoiceModal(props: { sheet: CharacterDto }) {
       if (entry.kind !== 'feat')
         return false
       const category = entry.body.category
+      if (entry.id === 'feat-ability-score-improvement' || category === 'asi')
+        return false
       if (pending === 'feat')
-        return category === 'epic-boon' || category === 'asi'
+        return category === 'epic-boon'
       return category !== 'epic-boon'
     })
     .map(entry => ({ value: entry.id, label: entry.name }))
@@ -841,7 +773,6 @@ function LevelChoiceModal(props: { sheet: CharacterDto }) {
         )}
         {pending === 'subclass' && (
           <>
-            <Text size="sm" c="dimmed">Четыре подкласса PHB 2024.</Text>
             <Select label="Подкласс" data={subclassOptions} value={pickedSubclass} onChange={setSubclassId} />
             <Button disabled={!pickedSubclass} onClick={() => pickedSubclass && submit({ characterId: props.sheet.id, body: { kind: 'subclass', subclassId: pickedSubclass } })}>
               Выбрать
@@ -861,39 +792,11 @@ function LevelChoiceModal(props: { sheet: CharacterDto }) {
   )
 }
 
-function sheetTitle(sheet: CharacterDto, catalog: Record<string, string>) {
-  const klass = catalog[sheet.classId] ?? 'Герой'
-  const subclass = catalog[sheet.subclassId]
-  const species = catalog[sheet.speciesId]
-  const klassLine = subclass ? `${klass} · ${subclass} ${sheet.level}` : `${klass} ${sheet.level}`
-  return species ? `${klassLine} · ${species}` : klassLine
-}
-
-function modifierText(score: number) {
-  const mod = abilityModifier(score)
-  if (mod > 0)
-    return `+${mod}`
-  return String(mod)
-}
-
-function AbilityScores(props: { sheet: CharacterDto, master: boolean }) {
+function AbilityEditors(props: { sheet: CharacterDto }) {
   const edit = useUnit(abilityScoreEdited)
-  if (!props.master) {
-    return (
-      <Group gap="xs" grow>
-        {abilityOrder.map(key => (
-          <Stack key={key} gap={0} align="center">
-            <Text size="xs" c="dimmed">{abilityShort[key]}</Text>
-            <Text size="sm" fw={700}>{modifierText(props.sheet.abilities[key])}</Text>
-            <Text size="xs">{String(props.sheet.abilities[key])}</Text>
-          </Stack>
-        ))}
-      </Group>
-    )
-  }
   return (
     <Group gap="xs">
-      {abilityOrder.map(key => (
+      {abilities.map(key => (
         <NumberInput
           key={`${props.sheet.id}:${key}:${props.sheet.abilities[key]}`}
           size="xs"
@@ -919,39 +822,10 @@ function readInt(value: string, fallback: number) {
   return Number.isFinite(next) ? Math.trunc(next) : fallback
 }
 
-function SheetTrackers(props: { sheet: CharacterDto }) {
-  const { inspire, exhaust, death, condition } = useUnit({
-    inspire: inspirationToggled,
-    exhaust: exhaustionAdjusted,
-    death: deathSaveRecorded,
-    condition: conditionToggled,
-  })
+function ConditionTrackers(props: { sheet: CharacterDto }) {
+  const condition = useUnit(conditionToggled)
   return (
     <Stack gap="sm">
-      <Divider label="Вдохновение и истощение" labelPosition="left" />
-      <Group gap="xs">
-        <Button size="xs" variant={props.sheet.heroicInspiration ? 'filled' : 'light'} onClick={() => inspire(props.sheet.id)}>Вдохновение</Button>
-        <Button size="xs" variant="default" onClick={() => exhaust({ characterId: props.sheet.id, delta: -1 })}>Истощение −</Button>
-        <Button size="xs" variant="default" onClick={() => exhaust({ characterId: props.sheet.id, delta: 1 })}>Истощение +</Button>
-      </Group>
-      {isDeadFromExhaustion(props.sheet.exhaustion) && <Text size="sm">Истощение 10: персонаж мёртв</Text>}
-      <Divider label="Спасброски от смерти" labelPosition="left" />
-      <Group gap="xs" align="center">
-        <Text size="xs">Успехи</Text>
-        <SavePips
-          filled={props.sheet.deathSaves.successes}
-          label="Успех смерти"
-          color="teal"
-          onAdd={() => death({ characterId: props.sheet.id, kind: 'successes' })}
-        />
-        <Text size="xs">Провалы</Text>
-        <SavePips
-          filled={props.sheet.deathSaves.failures}
-          label="Провал смерти"
-          color="red"
-          onAdd={() => death({ characterId: props.sheet.id, kind: 'failures' })}
-        />
-      </Group>
       <Divider label="Состояния" labelPosition="left" />
       <Group gap="xs">
         {conditionNames.map(name => (
@@ -966,28 +840,6 @@ function SheetTrackers(props: { sheet: CharacterDto }) {
         ))}
       </Group>
     </Stack>
-  )
-}
-
-function SavePips(props: { filled: number, label: string, color: string, onAdd: () => void }) {
-  return (
-    <Group gap={4}>
-      {Array.from({ length: 3 }, (_, index) => {
-        const marked = index < props.filled
-        const next = index === props.filled
-        return (
-          <ActionIcon
-            key={index}
-            size="sm"
-            variant={marked ? 'filled' : 'default'}
-            color={marked ? props.color : undefined}
-            aria-label={props.label}
-            disabled={!marked && !next}
-            onClick={next ? props.onAdd : undefined}
-          />
-        )
-      })}
-    </Group>
   )
 }
 
@@ -1032,7 +884,10 @@ function HeroCard(props: { character: CharacterDto, tokenId: string | null, onOp
           radius="md"
         />
         <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
-          <Text fw={700} c="yellow.4" truncate="end">{hero.name}</Text>
+          <Group gap="xs" wrap="nowrap">
+            <Text fw={700} c="yellow.4" truncate="end" style={{ flex: 1, minWidth: 0 }}>{hero.name}</Text>
+            <OwnerMark userId={hero.userId} />
+          </Group>
           <HpBar current={hero.hpCurrent} max={hero.hpMax} temp={hero.hpTemp} />
           <Text size="xs" c="dimmed">{`${klass} ${hero.level}`}</Text>
           <Group gap="md">
@@ -1106,21 +961,6 @@ function damageExtra(bonus: number) {
   if (bonus < 0)
     return String(bonus)
   return ''
-}
-
-function PortraitUpload(props: { characterId: string }) {
-  const choose = useUnit(portraitChosen)
-  return (
-    <FileButton
-      accept="image/*"
-      onChange={(file) => {
-        if (file)
-          choose({ characterId: props.characterId, file })
-      }}
-    >
-      {buttonProps => <Button {...buttonProps} size="xs" variant="default">Портрет</Button>}
-    </FileButton>
-  )
 }
 
 function MapUpload() {

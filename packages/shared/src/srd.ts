@@ -251,8 +251,12 @@ const backgrounds: SrdSeed[] = backgroundRows.map(row => ({
   name: row.name,
   body: {
     originFeatId: row.originFeatId,
+    originFeatName: row.originFeatName,
     abilities: [...row.abilities],
     skills: [...row.skills],
+    tools: row.tools,
+    equipment: row.equipment,
+    text: row.text,
   },
 }))
 

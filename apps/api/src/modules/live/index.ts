@@ -1,7 +1,7 @@
 import type { CampaignRole } from '@dnd/shared'
 import { Elysia } from 'elysia'
 import { getCampaignRole } from '../../lib/rbac'
-import { buildSnapshot } from '../../lib/table'
+import { buildSnapshot, normalizeMobs } from '../../lib/table'
 import { handleLiveMessage, joinRoom } from '../../live/hub'
 import { jwtPlugin, verifyToken } from '../../plugins/jwt'
 
@@ -43,6 +43,7 @@ export const liveModule = new Elysia({ name: 'live' })
         send: payload => ws.send(payload),
       })
       sessions.set(socketKey(ws), { campaignId, userId, role, leave })
+      await normalizeMobs(campaignId)
       const snapshot = await buildSnapshot(userId, campaignId)
       ws.send({ type: 'snapshot', snapshot })
     },

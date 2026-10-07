@@ -2,7 +2,7 @@ import type { SceneDto, TokenDto } from '@dnd/shared'
 import { isBloodied } from '@dnd/shared'
 import { ActionIcon, Button, Group, Stack, Text } from '@mantine/core'
 import { IconArrowsMaximize, IconMinus, IconPlus } from '@tabler/icons-react'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Circle, Layer, Line, Image as MapImage, Rect, Group as ShapeGroup, Text as ShapeText, Stage } from 'react-konva'
 import { boardSize, cellAt, cellCenter, cellOutline, cellSpaceToPixels, gridShift, mapOrigin, readBoardGrid } from './grid'
 
@@ -46,7 +46,7 @@ interface CellPoint {
   y: number
 }
 
-export function MapBoard(props: {
+function MapBoardView(props: {
   scene: SceneDto
   tokens: TokenDto[]
   dm: boolean
@@ -277,7 +277,8 @@ export function MapBoard(props: {
     const point = readCell(event)
     if (!point)
       return
-    setHover(current => sameCell(current, point) ? current : point)
+    if (tool !== 'move')
+      setHover(current => sameCell(current, point) ? current : point)
     const drag = fogDragRef.current
     if (!drag || sameCell(drag.aim, point))
       return
@@ -525,6 +526,48 @@ export function MapBoard(props: {
       </div>
     </div>
   )
+}
+
+export const MapBoard = memo(MapBoardView, sameMapProps)
+
+function sameMapProps(prev: {
+  scene: SceneDto
+  tokens: TokenDto[]
+  dm: boolean
+  focusToken?: { x: number, y: number, tick: number } | null
+}, next: {
+  scene: SceneDto
+  tokens: TokenDto[]
+  dm: boolean
+  focusToken?: { x: number, y: number, tick: number } | null
+}) {
+  return prev.dm === next.dm
+    && prev.focusToken === next.focusToken
+    && prev.scene.id === next.scene.id
+    && prev.scene.imageUrl === next.scene.imageUrl
+    && prev.scene.fog === next.scene.fog
+    && prev.scene.grid === next.scene.grid
+    && sameTokens(prev.tokens, next.tokens)
+}
+
+function sameTokens(left: TokenDto[], right: TokenDto[]) {
+  if (left === right)
+    return true
+  if (left.length !== right.length)
+    return false
+  return left.every((token, index) => {
+    const other = right[index]
+    return other != null
+      && token.id === other.id
+      && token.x === other.x
+      && token.y === other.y
+      && token.hpCurrent === other.hpCurrent
+      && token.hpMax === other.hpMax
+      && token.hidden === other.hidden
+      && token.obscured === other.obscured
+      && token.name === other.name
+      && token.imageUrl === other.imageUrl
+  })
 }
 
 function TokenPiece(props: {

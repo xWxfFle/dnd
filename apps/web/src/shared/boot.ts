@@ -20,7 +20,8 @@ import {
   meQuery,
   registerMutation,
   snapshotQuery,
-  srdQuery,
+  srdKitQuery,
+  srdSpellsQuery,
 } from './api'
 import { characterRoute, homeRoute, joinRoute, loginRoute, registerRoute, tableRoute } from './routing'
 import { appScope, currentUser, signedOut, token } from './session'
@@ -162,8 +163,15 @@ export function bootClient() {
       },
     })
     reaction({
+      on: characterRoute.opened,
+      run() {
+        void resetCharacterWizard()
+      },
+    })
+    reaction({
       on: createCharacterMutation.doneData,
       run(character) {
+        void resetCharacterWizard()
         void tableRoute.open({ params: { id: character.campaignId }, replace: true })
       },
     })
@@ -175,7 +183,8 @@ export function bootClient() {
       on: homeRoute.opened,
       filter: () => Boolean(token.value),
     })
-    trigger(srdQuery, { on: [characterRoute.opened, tableRoute.opened] })
+    trigger(srdKitQuery, { on: [characterRoute.opened, tableRoute.opened] })
+    trigger(srdSpellsQuery, { on: tableRoute.opened })
     trigger(snapshotQuery, {
       on: [tableRoute.opened, characterRoute.opened],
       params: () => openedCampaignId(),
@@ -211,6 +220,11 @@ export function bootClient() {
   bootRollToasts()
 }
 
+async function resetCharacterWizard() {
+  await characterWizard.reset()
+  await characterWizard.goTo('class')
+}
+
 function openedCampaignId() {
   if (tableRoute.isOpened.value)
     return tableRoute.params.value.id
@@ -223,6 +237,7 @@ export function signOut() {
   scoped(appScope, () => {
     token.value = null
     currentUser.value = null
+    signedOut()
     void loginRoute.open({ replace: true })
   })
 }

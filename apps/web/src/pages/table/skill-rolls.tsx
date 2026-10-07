@@ -1,7 +1,7 @@
 import type { CharacterDto } from '@dnd/shared'
 import type { SheetRollMode } from './model'
 import { abilities, abilityLabel, abilityModifier, attackBonus, skillAbility, skillLabel, skills } from '@dnd/shared'
-import { Button, Checkbox, Group, Stack, Text } from '@mantine/core'
+import { Badge, Button, Checkbox, Group, Stack, Text } from '@mantine/core'
 import { useUnit } from '@virentia/react'
 import { liveSnapshot } from './live'
 import { dm, sheetCheckRolled, sheetRollMode, sheetRollModeChosen, sheetRollModes, skillProficiencyToggled } from './model'
@@ -28,7 +28,7 @@ export function RollModePicker() {
   )
 }
 
-export function SkillRolls(props: { sheet: CharacterDto }) {
+export function SkillRolls(props: { sheet: CharacterDto, canRoll: boolean }) {
   const { roll, snapshot, master, toggleSkill } = useUnit({
     roll: sheetCheckRolled,
     snapshot: liveSnapshot,
@@ -40,28 +40,33 @@ export function SkillRolls(props: { sheet: CharacterDto }) {
   const exhaustion = sheet.exhaustion
   return (
     <Stack gap="sm">
-      <RollModePicker />
-      {latest && (
+      {props.canRoll && <RollModePicker />}
+      {props.canRoll && latest && (
         <Text size="sm">{`${latest.displayName}: ${latest.label} ${latest.rolls.join(', ')} = ${latest.total}`}</Text>
       )}
       <Text size="xs">Проверки</Text>
       <Group gap="xs">
-        {abilities.map(ability => (
-          <Button
-            key={ability}
-            size="xs"
-            variant="default"
-            onClick={() => roll({
-              label: abilityLabel[ability],
-              bonus: abilityModifier(sheet.abilities[ability]),
-              exhaustion,
-            })}
-          >
-            {`${abilityLabel[ability]} ${signed(abilityModifier(sheet.abilities[ability]))}`}
-          </Button>
-        ))}
+        {abilities.map((ability) => {
+          const label = `${abilityLabel[ability]} ${signed(abilityModifier(sheet.abilities[ability]))}`
+          if (!props.canRoll)
+            return <Badge key={ability} size="sm" variant="outline">{label}</Badge>
+          return (
+            <Button
+              key={ability}
+              size="xs"
+              variant="default"
+              onClick={() => roll({
+                label: abilityLabel[ability],
+                bonus: abilityModifier(sheet.abilities[ability]),
+                exhaustion,
+              })}
+            >
+              {label}
+            </Button>
+          )
+        })}
       </Group>
-      <Text size="xs">Навыки</Text>
+      <Text size="xs">Владение</Text>
       {master && (
         <Stack gap={4}>
           <Text size="xs" c="dimmed">Владение — ставит мастер</Text>
@@ -77,38 +82,62 @@ export function SkillRolls(props: { sheet: CharacterDto }) {
         </Stack>
       )}
       <Group gap="xs">
-        {skills.map((skill) => {
-          const bonus = attackBonus(sheet.abilities, skillAbility[skill], sheet.level, sheet.skillProficiencies.includes(skill))
+        {skills.filter(skill => sheet.skillProficiencies.includes(skill)).map((skill) => {
+          const bonus = attackBonus(sheet.abilities, skillAbility[skill], sheet.level, true)
           return (
-            <Button
+            <SkillChip
               key={skill}
-              size="xs"
-              variant={sheet.skillProficiencies.includes(skill) ? 'light' : 'default'}
-              onClick={() => roll({ label: skillLabel[skill], bonus, exhaustion })}
-            >
-              {`${skillLabel[skill]} ${signed(bonus)}`}
-            </Button>
+              label={`${skillLabel[skill]} ${signed(bonus)}`}
+              canRoll={props.canRoll}
+              proficient
+              onRoll={() => roll({ label: skillLabel[skill], bonus, exhaustion })}
+            />
+          )
+        })}
+        {sheet.skillProficiencies.length === 0 && <Text size="xs" c="dimmed">Нет владений</Text>}
+      </Group>
+      <Text size="xs">Прочие навыки</Text>
+      <Group gap="xs">
+        {skills.filter(skill => !sheet.skillProficiencies.includes(skill)).map((skill) => {
+          const bonus = attackBonus(sheet.abilities, skillAbility[skill], sheet.level, false)
+          return (
+            <SkillChip
+              key={skill}
+              label={`${skillLabel[skill]} ${signed(bonus)}`}
+              canRoll={props.canRoll}
+              proficient={false}
+              onRoll={() => roll({ label: skillLabel[skill], bonus, exhaustion })}
+            />
           )
         })}
       </Group>
       <Text size="xs">Спасброски</Text>
       <Group gap="xs">
         {abilities.map((ability) => {
-          const bonus = attackBonus(sheet.abilities, ability, sheet.level, sheet.saveProficiencies.includes(ability))
-          const label = `Спас ${abilityLabel[ability]}`
+          const proficient = sheet.saveProficiencies.includes(ability)
+          const bonus = attackBonus(sheet.abilities, ability, sheet.level, proficient)
           return (
-            <Button
+            <SkillChip
               key={ability}
-              size="xs"
-              variant={sheet.saveProficiencies.includes(ability) ? 'light' : 'default'}
-              onClick={() => roll({ label, bonus, exhaustion })}
-            >
-              {`${label} ${signed(bonus)}`}
-            </Button>
+              label={`Спас ${abilityLabel[ability]} ${signed(bonus)}`}
+              canRoll={props.canRoll}
+              proficient={proficient}
+              onRoll={() => roll({ label: `Спас ${abilityLabel[ability]}`, bonus, exhaustion })}
+            />
           )
         })}
       </Group>
     </Stack>
+  )
+}
+
+function SkillChip(props: { label: string, canRoll: boolean, proficient: boolean, onRoll: () => void }) {
+  if (!props.canRoll)
+    return <Badge size="sm" variant={props.proficient ? 'light' : 'outline'}>{props.label}</Badge>
+  return (
+    <Button size="xs" variant={props.proficient ? 'light' : 'default'} onClick={props.onRoll}>
+      {props.label}
+    </Button>
   )
 }
 

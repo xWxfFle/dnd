@@ -4,7 +4,7 @@ import { effect, reaction, scoped, store } from '@virentia/core'
 import { snapshotQuery } from '@/shared/api'
 import { liveClient } from '@/shared/live-socket'
 import { tableRoute } from '@/shared/routing'
-import { appScope, readToken } from '@/shared/session'
+import { appScope, readToken, signedOut } from '@/shared/session'
 
 export const liveSnapshot = store<SnapshotDto | null>(null)
 
@@ -70,6 +70,13 @@ export function bootTable() {
     reaction({
       on: tableRoute.closed,
       run() {
+        void closeLiveFx()
+      },
+    })
+    reaction({
+      on: signedOut,
+      run() {
+        liveSnapshot.value = null
         void closeLiveFx()
       },
     })

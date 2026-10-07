@@ -105,7 +105,7 @@ function verdictKind(hit: boolean, critical: boolean) {
   return 'hit' as const
 }
 
-async function tokenInCampaign(tokenId: string, campaignId: string) {
+export async function tokenInCampaign(tokenId: string, campaignId: string) {
   const [token] = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1)
   if (!token)
     return null
@@ -113,6 +113,13 @@ async function tokenInCampaign(tokenId: string, campaignId: string) {
   if (!scene || scene.campaignId !== campaignId)
     return null
   return token
+}
+
+export async function sceneInCampaign(sceneId: string, campaignId: string) {
+  const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1)
+  if (!scene || scene.campaignId !== campaignId)
+    return null
+  return scene
 }
 
 async function armorOf(token: { characterId: string | null, ac: number | null }) {

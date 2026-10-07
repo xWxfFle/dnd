@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm'
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -42,7 +43,9 @@ export const srdEntries = pgTable('srd_entries', {
   kind: text('kind').notNull(),
   name: text('name').notNull(),
   body: jsonb('body').notNull(),
-})
+}, table => [
+  index('srd_entries_kind_idx').on(table.kind),
+])
 
 export const characters = pgTable('characters', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -81,7 +84,9 @@ export const characters = pgTable('characters', {
   featureToggles: jsonb('feature_toggles').notNull().default([]),
   featIds: jsonb('feat_ids').notNull().default([]),
   pendingChoice: text('pending_choice'),
-})
+}, table => [
+  index('characters_campaign_id_idx').on(table.campaignId),
+])
 
 export const creaturePresets = pgTable('creature_presets', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -94,7 +99,9 @@ export const creaturePresets = pgTable('creature_presets', {
   abilities: jsonb('abilities').notNull(),
   saves: jsonb('saves').notNull().default({}),
   color: text('color').notNull().default('#5c4d7a'),
-})
+}, table => [
+  index('creature_presets_campaign_id_idx').on(table.campaignId),
+])
 
 export const scenes = pgTable('scenes', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -105,7 +112,9 @@ export const scenes = pgTable('scenes', {
   fog: jsonb('fog').notNull().default([]),
   dmNotes: text('dm_notes').notNull().default(''),
   active: boolean('active').notNull().default(false),
-})
+}, table => [
+  index('scenes_campaign_id_idx').on(table.campaignId),
+])
 
 export const tokens = pgTable('tokens', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -127,14 +136,19 @@ export const tokens = pgTable('tokens', {
   saves: jsonb('saves'),
   inventory: jsonb('inventory').notNull().default([]),
   imagePath: text('image_path'),
-})
+}, table => [
+  index('tokens_scene_id_idx').on(table.sceneId),
+  index('tokens_character_id_idx').on(table.characterId),
+])
 
 export const combats = pgTable('combats', {
   id: uuid('id').defaultRandom().primaryKey(),
   sceneId: uuid('scene_id').notNull().references(() => scenes.id, { onDelete: 'cascade' }),
   round: integer('round').notNull().default(1),
   activeIndex: integer('active_index').notNull().default(0),
-})
+}, table => [
+  index('combats_scene_id_idx').on(table.sceneId),
+])
 
 export const combatants = pgTable('combatants', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -147,7 +161,9 @@ export const combatants = pgTable('combatants', {
   hidden: boolean('hidden').notNull().default(false),
   slotSpentThisTurn: boolean('slot_spent_this_turn').notNull().default(false),
   sortOrder: integer('sort_order').notNull(),
-})
+}, table => [
+  index('combatants_combat_id_idx').on(table.combatId),
+])
 
 export const diceRolls = pgTable('dice_rolls', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -159,7 +175,9 @@ export const diceRolls = pgTable('dice_rolls', {
   rolls: jsonb('rolls').notNull(),
   total: integer('total').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+}, table => [
+  index('dice_rolls_campaign_created_idx').on(table.campaignId, table.createdAt),
+])
 
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(campaignMembers),

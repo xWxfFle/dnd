@@ -398,6 +398,16 @@ export const createPresetSchema = z.object({
   color: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
 })
 
+export const campaignMemberSchema = z.object({
+  userId: z.uuid(),
+  displayName: z.string(),
+  role: z.enum(['dm', 'player']),
+})
+
+export const assignCharacterSchema = z.object({
+  userId: z.uuid(),
+})
+
 export const snapshotSchema = z.object({
   campaign: campaignSchema,
   scenes: z.array(sceneSchema),
@@ -406,6 +416,7 @@ export const snapshotSchema = z.object({
   rolls: z.array(diceRollSchema),
   characters: z.array(characterSchema),
   presets: z.array(creaturePresetSchema),
+  members: z.array(campaignMemberSchema),
 })
 
 export type RegisterInput = z.infer<typeof registerSchema>
@@ -419,6 +430,7 @@ export type SceneDto = z.infer<typeof sceneSchema>
 export type TokenDto = z.infer<typeof tokenSchema>
 export type CombatDto = z.infer<typeof combatSchema>
 export type SnapshotDto = z.infer<typeof snapshotSchema>
+export type CampaignMemberDto = z.infer<typeof campaignMemberSchema>
 export type SrdEntryDto = z.infer<typeof srdEntrySchema>
 export type CreaturePresetDto = z.infer<typeof creaturePresetSchema>
 export type CreatePresetInput = z.infer<typeof createPresetSchema>

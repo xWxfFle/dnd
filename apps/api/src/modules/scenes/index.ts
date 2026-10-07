@@ -4,8 +4,8 @@ import { status } from 'elysia'
 import { z } from 'zod'
 import { db } from '../../db'
 import { characters, scenes, tokens } from '../../db/schema'
-import { activateScene, changeTokenHp, deleteScene, endCombat, moveToken, placeCharacterToken, removeCharacterToken, replaceFog, setTokenHidden, startCombat, updateTokenStats } from '../../lib/combat'
-import { toSceneDto, toTokenDto } from '../../lib/table'
+import { activateScene, changeTokenHp, deleteScene, endCombat, moveToken, placeCharacterToken, removeCharacterToken, replaceFog, sceneInCampaign, setTokenHidden, startCombat, tokenInCampaign, updateTokenStats } from '../../lib/combat'
+import { normalizeMobs, toSceneDto, toTokenDto } from '../../lib/table'
 import { rejectUnlessImage, uploadName, writeUpload } from '../../lib/uploads'
 import { broadcast } from '../../live/hub'
 import { campaignRoutes } from '../../plugins/campaign-access'
@@ -111,8 +111,11 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     body: imageBody,
   })
   .post('/:id/scenes/:sceneId/tokens', async ({ params, body }) => {
+    const scene = await sceneInCampaign(params.sceneId, params.id)
+    if (!scene)
+      return status(404, { error: 'Not found' })
     const [token] = await db.insert(tokens).values({
-      sceneId: params.sceneId,
+      sceneId: scene.id,
       name: body.name,
       x: body.x,
       y: body.y,
@@ -130,6 +133,7 @@ export const scenesModule = campaignRoutes('campaign-scenes')
       saves: body.saves ?? null,
       inventory: body.inventory ?? [],
     }).returning()
+    await normalizeMobs(params.id)
     await broadcast(params.id)
     return toTokenDto(token)
   }, {
@@ -138,7 +142,10 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     body: createTokenSchema,
   })
   .patch('/:id/tokens/:tokenId', async ({ params, body }) => {
-    const token = await updateTokenStats(params.tokenId, body)
+    const placed = await tokenInCampaign(params.tokenId, params.id)
+    if (!placed)
+      return status(404, { error: 'Not found' })
+    const token = await updateTokenStats(placed.id, body)
     if (!token)
       return status(404, { error: 'Not found' })
     await broadcast(params.id)
@@ -152,7 +159,7 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     const rejected = await rejectUnlessImage(body.file, 'Нужна картинка', imageLimitMb.portrait)
     if (rejected)
       return rejected
-    const [current] = await db.select().from(tokens).where(eq(tokens.id, params.tokenId)).limit(1)
+    const current = await tokenInCampaign(params.tokenId, params.id)
     if (!current)
       return status(404, { error: 'Not found' })
     const storagePath = await writeUpload(`token-${params.tokenId}-${uploadName(body.file.name)}`, body.file)
@@ -165,7 +172,10 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     body: imageBody,
   })
   .post('/:id/tokens/:tokenId/move', async ({ params, body }) => {
-    const token = await moveToken(params.tokenId, body.x, body.y)
+    const placed = await tokenInCampaign(params.tokenId, params.id)
+    if (!placed)
+      return status(404, { error: 'Not found' })
+    const token = await moveToken(placed.id, body.x, body.y)
     if (!token)
       return status(404, { error: 'Not found' })
     await broadcast(params.id)
@@ -176,7 +186,10 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     body: moveTokenSchema,
   })
   .post('/:id/tokens/:tokenId/hp', async ({ params, body }) => {
-    const token = await changeTokenHp(params.tokenId, body.delta)
+    const placed = await tokenInCampaign(params.tokenId, params.id)
+    if (!placed)
+      return status(404, { error: 'Not found' })
+    const token = await changeTokenHp(placed.id, body.delta)
     if (!token)
       return status(404, { error: 'Not found' })
     await broadcast(params.id)
@@ -187,7 +200,10 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     body: hpSchema,
   })
   .post('/:id/tokens/:tokenId/hidden', async ({ params, body }) => {
-    const token = await setTokenHidden(params.tokenId, body.hidden)
+    const placed = await tokenInCampaign(params.tokenId, params.id)
+    if (!placed)
+      return status(404, { error: 'Not found' })
+    const token = await setTokenHidden(placed.id, body.hidden)
     await broadcast(params.id)
     return token ? toTokenDto(token) : null
   }, {
@@ -196,7 +212,10 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     body: hiddenSchema,
   })
   .post('/:id/scenes/:sceneId/fog', async ({ params, body }) => {
-    await replaceFog(params.sceneId, body.fog ?? [])
+    const scene = await sceneInCampaign(params.sceneId, params.id)
+    if (!scene)
+      return status(404, { error: 'Not found' })
+    await replaceFog(scene.id, body.fog ?? [])
     await broadcast(params.id)
     return { ok: true }
   }, {

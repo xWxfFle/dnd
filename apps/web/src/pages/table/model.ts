@@ -2,7 +2,8 @@ import type { Abilities, Ability, AttackDef, CreatePresetInput, InventoryItem, K
 import { abilityLabel, abilityModifier, d20Formula, featuresForSheet, formatDiceFormula, imageLimitMb, imageTooLarge, parseDice, readAbilities, readArmorClass, readDiceFormula, readInventory, readSaveOverrides, saveBonus, skills, tokenSchema } from '@dnd/shared'
 import { notifications } from '@mantine/notifications'
 import { computed, effect, event, reaction, scoped, store } from '@virentia/core'
-import { apiRead, apiSend, srdQuery } from '@/shared/api'
+import { trigger } from '@virentia/net-core'
+import { apiRead, apiSend, srdKitQuery, srdMonstersQuery, srdSpellsQuery } from '@/shared/api'
 import { characterRoute, homeRoute, tableRoute } from '@/shared/routing'
 import { appScope, readUserId } from '@/shared/session'
 import { readAttacks } from './attacks'
@@ -43,7 +44,7 @@ export const dm = computed(() => liveSnapshot.value?.campaign.role === 'dm')
 
 export const viewerId = computed(() => readUserId())
 
-export const monsters = computed(() => (srdQuery.data.value ?? []).filter(entry => entry.kind === 'monster'))
+export const monsters = computed(() => srdMonstersQuery.data.value ?? [])
 
 export const presets = computed(() => liveSnapshot.value?.presets ?? [])
 
@@ -63,8 +64,14 @@ export const sheets = computed(() => {
   })
 })
 
+export const campaignMembers = computed(() => liveSnapshot.value?.members ?? [])
+
 export const catalogNames = computed(() => Object.fromEntries(
-  (srdQuery.data.value ?? []).map(entry => [entry.id, entry.name]),
+  [
+    ...(srdKitQuery.data.value ?? []),
+    ...(srdSpellsQuery.data.value ?? []),
+    ...(srdMonstersQuery.data.value ?? []),
+  ].map(entry => [entry.id, entry.name]),
 ))
 
 export const sceneTokens = computed(() => {
@@ -128,6 +135,7 @@ export const gridApplyRequested = event<void>()
 export const notesChanged = event<string>()
 export const notesSaveRequested = event<void>()
 export const monsterSelected = event<string>()
+export const mobPickerOpened = event()
 export const monsterCopiesChanged = event<string | number>()
 export const monsterPlaceRequested = event<{ copies: number, image?: File }>()
 export const characterPlacementToggled = event<string>()
@@ -161,6 +169,7 @@ export const mapFileChosen = event<File>()
 export const featureUsed = event<{ characterId: string, featureId: string }>()
 export const resourceSpent = event<{ characterId: string, resourceId: string }>()
 export const heroCreateRequested = event<void>()
+export const heroOwnerAssigned = event<{ characterId: string, userId: string }>()
 export const heroNotesSaved = event<{ characterId: string, notes: string }>()
 export const hpTempEdited = event<{ characterId: string, hpTemp: number }>()
 export const levelChoiceSubmitted = event<{
@@ -186,7 +195,7 @@ export const combatAdvanced = event<void>()
 export const combatEnded = event<void>()
 export const slotMarked = event<void>()
 export const tokenMoved = event<{ tokenId: string, x: number, y: number }>()
-export const fogUpdated = event<{ sceneId: string, fog: { id: string, points: number[] }[] }>()
+export const fogUpdated = event<{ id: string, points: number[] }[]>()
 export const tokenHpChanged = event<{ tokenId: string, delta: number }>()
 export const tokenHiddenToggled = event<string>()
 export const tokenRemoved = event<string>()
@@ -250,6 +259,7 @@ const blankMobAbilities: Abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 
 
 export function bootTableModel() {
   scoped(appScope, () => {
+    trigger(srdMonstersQuery, { on: mobPickerOpened })
     reaction({
       on: liveSnapshot,
       run(snapshot) {
@@ -731,6 +741,15 @@ export function bootTableModel() {
       },
     })
     reaction({
+      on: heroOwnerAssigned,
+      run({ characterId, userId }) {
+        const base = campaignBase()
+        if (!base)
+          return
+        void commandFx({ path: `${base}/characters/${characterId}/owner`, method: 'POST', body: { userId } })
+      },
+    })
+    reaction({
       on: heroNotesSaved,
       run({ characterId, notes }) {
         patchCharacter(characterId, { notes: notes.slice(0, 20000) })
@@ -804,7 +823,7 @@ export function bootTableModel() {
       run({ characterId, spellId }) {
         const sheet = characterById(characterId)
         const known = sheet?.spells.find(item => item.id === spellId)
-        const spell = (srdQuery.data.value ?? []).find(entry => entry.id === spellId)
+        const spell = (srdSpellsQuery.data.value ?? []).find(entry => entry.id === spellId)
         if (!sheet || (!known && !spell))
           return
         const level = known?.level ?? Number(spell?.body.level ?? 0)
@@ -948,20 +967,34 @@ export function bootTableModel() {
     reaction({
       on: tokenMoved,
       run(move) {
+        const snapshot = liveSnapshot.value
+        if (snapshot) {
+          liveSnapshot.value = {
+            ...snapshot,
+            tokens: snapshot.tokens.map(token => token.id === move.tokenId ? { ...token, x: move.x, y: move.y } : token),
+          }
+        }
         void sendLiveFx({ type: 'move', ...move })
       },
     })
     reaction({
       on: fogUpdated,
-      run({ sceneId, fog }) {
+      run(fog) {
+        const current = scene.value
         const snapshot = liveSnapshot.value
-        if (snapshot) {
-          liveSnapshot.value = {
-            ...snapshot,
-            scenes: snapshot.scenes.map(item => item.id === sceneId ? { ...item, fog } : item),
-          }
+        if (!current || !snapshot)
+          return
+        liveSnapshot.value = {
+          ...snapshot,
+          scenes: snapshot.scenes.map(item => item.id === current.id ? { ...item, fog } : item),
         }
-        void sendLiveFx({ type: 'fog', sceneId, fog })
+        void sendLiveFx({ type: 'fog', sceneId: current.id, fog })
+      },
+    })
+    reaction({
+      on: commandFx.failData,
+      run(error) {
+        showCommandError(error instanceof Error ? error.message : 'Запрос не прошёл')
       },
     })
     reaction({
@@ -1040,6 +1073,10 @@ function oversizeMessage(limitMb: number) {
 
 function showUploadError(message: string) {
   notifications.show({ color: 'red', title: 'Картинка не загружена', message })
+}
+
+function showCommandError(message: string) {
+  notifications.show({ color: 'red', title: 'Не вышло', message })
 }
 
 function campaignBase() {

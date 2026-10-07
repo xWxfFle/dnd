@@ -3,7 +3,7 @@ import { abilities, abilityLabel, skillChoiceForOrigin, skillLabel, skills } fro
 import { Button, Checkbox, Group, NumberInput, Select, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useField, useWizard } from '@virentia/forms-react'
 import { useUnit } from '@virentia/react'
-import { srdQuery } from '@/shared/api'
+import { srdKitQuery } from '@/shared/api'
 import { characterWizard } from '@/shared/boot'
 import { characterRoute, tableRoute } from '@/shared/routing'
 import { AccountMenu } from '@/shared/ui/account-menu'
@@ -19,7 +19,7 @@ const stepTitle = {
 export function CharacterPage() {
   const wizard = useWizard(characterWizard)
   const { entries, campaign, backToTable } = useUnit({
-    entries: srdQuery.data,
+    entries: srdKitQuery.data,
     campaign: characterRoute.params,
     backToTable: tableRoute.open,
   })
@@ -129,15 +129,9 @@ function ClassPreview(props: { classId: string, catalog: SrdEntryDto[] }) {
     ? entry.body.saves.filter((item): item is keyof typeof abilityLabel => typeof item === 'string' && item in abilityLabel).map(item => abilityLabel[item])
     : []
   const skillChoices = Number(entry.body.skillChoices ?? 0)
-  const classKey = props.classId.replace(/^class-/, '')
-  const subclasses = props.catalog
-    .filter(item => item.kind === 'subclass' && item.body.classId === classKey)
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
-  const subclassNames = subclasses.map(item => item.name).join(', ') || '—'
   return (
     <Text size="sm" c="dimmed">
-      {`Кость хитов ${hitDie}. Спасброски: ${saves.join(', ') || '—'}. Навыков на выбор: ${skillChoices}. Подкласс с 3 уровня: ${subclassNames}.`}
+      {`Кость хитов ${hitDie}. Спасброски: ${saves.join(', ') || '—'}. Навыков на выбор: ${skillChoices}.`}
     </Text>
   )
 }
@@ -148,13 +142,21 @@ function OriginPreview(props: { backgroundId: string, catalog: SrdEntryDto[] }) 
     return null
   const featId = typeof entry.body.originFeatId === 'string' ? entry.body.originFeatId : ''
   const feat = props.catalog.find(item => item.id === featId)
+  const featName = feat?.name ?? (typeof entry.body.originFeatName === 'string' ? entry.body.originFeatName : '')
   const granted = Array.isArray(entry.body.skills)
     ? entry.body.skills.filter((item): item is Skill => typeof item === 'string' && item in skillLabel).map(item => skillLabel[item])
     : []
+  const tools = typeof entry.body.tools === 'string' ? entry.body.tools : ''
+  const equipment = typeof entry.body.equipment === 'string' ? entry.body.equipment : ''
+  const text = typeof entry.body.text === 'string' ? entry.body.text : ''
   return (
-    <Text size="sm" c="dimmed">
-      {`Навыки фона: ${granted.join(', ') || '—'}. Черта происхождения: ${feat?.name ?? '—'}.`}
-    </Text>
+    <Stack gap={4}>
+      <Text size="sm" c="dimmed">
+        {`Навыки фона: ${granted.join(', ') || '—'}. Черта происхождения: ${featName || '—'}.${tools ? ` Инструменты: ${tools}.` : ''}`}
+      </Text>
+      {equipment ? <Text size="sm" c="dimmed">{`Снаряжение: ${equipment}`}</Text> : null}
+      {text ? <Text size="sm" c="dimmed">{text}</Text> : null}
+    </Stack>
   )
 }
 

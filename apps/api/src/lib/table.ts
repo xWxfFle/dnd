@@ -1,4 +1,4 @@
-import type { Abilities, Ability, AttackDef, CampaignRole, CharacterDto, ClassResource, CombatDto, CreaturePresetDto, DiceRollDto, DieTerm, PendingChoice, SceneDto, Skill, SnapshotDto, SpellSlot, TokenDto } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, CampaignMemberDto, CampaignRole, CharacterDto, ClassResource, CombatDto, CreaturePresetDto, DiceRollDto, DieTerm, PendingChoice, SceneDto, Skill, SnapshotDto, SpellSlot, TokenDto } from '@dnd/shared'
 import { statSync } from 'node:fs'
 import {
   abilities,
@@ -163,7 +163,7 @@ export function toCharacterDto(row: CharacterRow): CharacterDto {
     ac: gear.ac,
     speed: row.speed,
     attacks: gear.attacks,
-    spells: Array.isArray(row.spells) ? row.spells as CharacterDto['spells'] : [],
+    spells: compactKnownSpells(Array.isArray(row.spells) ? row.spells as CharacterDto['spells'] : []),
     slots: Array.isArray(row.slots) ? row.slots as CharacterDto['slots'] : [],
     conditions: Array.isArray(row.conditions) ? row.conditions as string[] : [],
     heroicInspiration: row.heroicInspiration,
@@ -179,9 +179,14 @@ export function toCharacterDto(row: CharacterRow): CharacterDto {
     kind: characterKindByValue[row.kind] ?? 'hero',
     classResources: storedResources.length > 0 ? storedResources : resourcesForLevel(row.classId, row.level),
     featureToggles: asIdList(row.featureToggles),
-    featIds: storedFeats.length > 0 ? storedFeats : originFeatOf(row.backgroundId),
+    featIds: listedFeatIds(storedFeats, row.backgroundId),
     pendingChoice: pendingOf(row.pendingChoice) ?? pendingSubclassOf(row),
   }
+}
+
+function listedFeatIds(stored: string[], backgroundId: string) {
+  const feats = stored.filter(id => id !== 'feat-ability-score-improvement')
+  return feats.length > 0 ? feats : originFeatOf(backgroundId)
 }
 
 function originFeatOf(backgroundId: string) {
@@ -278,14 +283,25 @@ function saveProficienciesOf(row: CharacterRow) {
 function knownSpellFromSrd(entry: { id: string, name: string, body: Record<string, unknown> }): CharacterDto['spells'][number] {
   const level = Number(entry.body.level ?? 0)
   const dice = typeof entry.body.dice === 'string' ? entry.body.dice : ''
-  const text = typeof entry.body.text === 'string' ? entry.body.text : ''
   return {
     id: entry.id,
     name: entry.name,
     level: Number.isFinite(level) ? Math.min(9, Math.max(0, Math.trunc(level))) : 0,
     ...(dice ? { dice } : {}),
-    ...(text ? { text: text.slice(0, 5000) } : {}),
   }
+}
+
+export function compactKnownSpells(spells: CharacterDto['spells']): CharacterDto['spells'] {
+  return spells.map((spell) => {
+    if (srdFullById(spell.id)?.kind !== 'spell')
+      return spell
+    return {
+      id: spell.id,
+      name: spell.name,
+      level: spell.level,
+      ...(spell.dice ? { dice: spell.dice } : {}),
+    }
+  })
 }
 
 export async function createCharacter(input: {
@@ -361,6 +377,18 @@ export async function createCharacter(input: {
     pendingChoice: null,
   }).returning()
   return toCharacterDto(row)
+}
+
+export async function assignCharacterOwner(row: CharacterRow, userId: string) {
+  const [member] = await db
+    .select({ userId: campaignMembers.userId })
+    .from(campaignMembers)
+    .where(and(eq(campaignMembers.campaignId, row.campaignId), eq(campaignMembers.userId, userId)))
+    .limit(1)
+  if (!member)
+    return null
+  const [updated] = await db.update(characters).set({ userId }).where(eq(characters.id, row.id)).returning()
+  return updated
 }
 
 const dmStatKeys = ['abilities', 'hpMax', 'hpCurrent', 'ac', 'speed', 'skillProficiencies', 'saveProficiencies', 'level', 'classId', 'subclassId', 'featIds', 'pendingChoice'] as const
@@ -451,6 +479,8 @@ export async function resolveCharacterChoice(row: CharacterRow, body: {
     const feat = srdById(id)
     if (feat?.kind !== 'feat')
       return null
+    if (id === 'feat-ability-score-improvement' || feat.body.category === 'asi')
+      return null
     if (pending === 'asi' && feat.body.category === 'epic-boon')
       return null
     const featIds = [...new Set([...asIdList(row.featIds), id])]
@@ -524,7 +554,7 @@ export async function listPresets(campaignId: string) {
   return rows.map(toPresetDto)
 }
 
-async function normalizeMobs(campaignId: string) {
+export async function normalizeMobs(campaignId: string) {
   await bakeCatalogTokens(campaignId)
   await promoteCustomMobs(campaignId)
 }
@@ -731,29 +761,73 @@ function concealCombat(combat: CombatDto | null, concealment: { hidden: Set<stri
   }
 }
 
-export async function buildSnapshot(userId: string, campaignId: string): Promise<SnapshotDto | null> {
-  const [member] = await db
-    .select({ campaign: campaigns, role: campaignMembers.role })
-    .from(campaignMembers)
-    .innerJoin(campaigns, eq(campaigns.id, campaignMembers.campaignId))
-    .where(and(eq(campaignMembers.campaignId, campaignId), eq(campaignMembers.userId, userId)))
-    .limit(1)
-  if (!member)
+interface CampaignState {
+  campaign: {
+    id: string
+    name: string
+    description: string | null
+    inviteCode: string
+    createdAt: Date
+  }
+  scenes: SceneDto[]
+  tokens: TokenDto[]
+  combat: CombatDto | null
+  rolls: DiceRollDto[]
+  characters: CharacterDto[]
+  presets: CreaturePresetDto[]
+  members: CampaignMemberDto[]
+}
+
+export async function loadCampaignState(campaignId: string): Promise<CampaignState | null> {
+  const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1)
+  if (!campaign)
     return null
-  await normalizeMobs(campaignId)
-  const role = member.role
-  const sceneRows = await listScenes(campaignId, role)
-  const tokenRows = await listTokens(sceneRows.map(scene => scene.id), role)
+  const sceneRows = await listScenes(campaignId, 'dm')
+  const tokenRows = await listTokens(sceneRows.map(scene => scene.id), 'dm')
   const active = sceneRows.find(scene => scene.active) ?? sceneRows[0] ?? null
   const sheetRows = await db.select().from(characters).where(eq(characters.campaignId, campaignId))
-  const visibleSheets = role === 'dm' ? sheetRows : sheetRows.filter(row => row.kind !== 'custom')
+  return {
+    campaign,
+    scenes: sceneRows,
+    tokens: tokenRows,
+    combat: active ? await loadCombat(active.id, 'dm') : null,
+    rolls: await listRolls(campaignId),
+    characters: sheetRows.map(toCharacterDto),
+    presets: await listPresets(campaignId),
+    members: await listCampaignMembers(campaignId),
+  }
+}
+
+async function listCampaignMembers(campaignId: string): Promise<CampaignMemberDto[]> {
+  const rows = await db
+    .select({
+      userId: users.id,
+      displayName: users.displayName,
+      role: campaignMembers.role,
+    })
+    .from(campaignMembers)
+    .innerJoin(users, eq(users.id, campaignMembers.userId))
+    .where(eq(campaignMembers.campaignId, campaignId))
+  return rows.slice().sort((left, right) => {
+    if (left.role !== right.role)
+      return left.role === 'dm' ? -1 : 1
+    return left.displayName.localeCompare(right.displayName, 'ru')
+  })
+}
+
+export function viewSnapshot(state: CampaignState, viewer: { userId: string, role: CampaignRole }): SnapshotDto {
+  const role = viewer.role
+  const scenes = role === 'dm'
+    ? state.scenes
+    : state.scenes.map(scene => ({ ...scene, dmNotes: undefined }))
+  const visibleTokens = role === 'dm' ? state.tokens : state.tokens.filter(token => !token.hidden)
   const concealment = role === 'dm'
     ? { hidden: new Set<string>(), obscured: new Set<string>() }
     : concealEnemies({
-        tokens: tokenRows,
-        fogByScene: new Map(sceneRows.map(scene => [scene.id, scene.fog])),
+        tokens: visibleTokens,
+        fogByScene: new Map(scenes.map(scene => [scene.id, scene.fog])),
       })
-  const tokens = tokenRows.flatMap((token) => {
+  const tokens = visibleTokens.flatMap((token) => {
     if (concealment.hidden.has(token.id))
       return []
     if (!concealment.obscured.has(token.id))
@@ -775,23 +849,57 @@ export async function buildSnapshot(userId: string, campaignId: string): Promise
       obscured: true,
     }]
   })
-  const combat = active ? await loadCombat(active.id, role) : null
+  const combat = role === 'dm'
+    ? state.combat
+    : state.combat
+      ? { ...state.combat, combatants: state.combat.combatants.filter(combatant => !combatant.hidden) }
+      : null
   return {
     campaign: {
-      id: member.campaign.id,
-      name: member.campaign.name,
-      description: member.campaign.description,
-      inviteCode: member.campaign.inviteCode,
+      id: state.campaign.id,
+      name: state.campaign.name,
+      description: state.campaign.description,
+      inviteCode: role === 'dm' ? state.campaign.inviteCode : '',
       role,
-      createdAt: member.campaign.createdAt.toISOString(),
+      createdAt: state.campaign.createdAt.toISOString(),
     },
-    scenes: sceneRows,
+    scenes,
     tokens,
     combat: concealCombat(combat, concealment),
-    rolls: await listRolls(campaignId),
-    characters: visibleSheets.map(toCharacterDto),
-    presets: await listPresets(campaignId),
+    rolls: state.rolls,
+    characters: viewCharacters(state.characters, viewer),
+    presets: role === 'dm' ? state.presets : [],
+    members: state.members,
   }
+}
+
+export function viewCharacters(sheets: CharacterDto[], viewer: { userId: string, role: CampaignRole }) {
+  const visible = viewer.role === 'dm' ? sheets : sheets.filter(sheet => sheet.kind !== 'custom')
+  if (viewer.role === 'dm')
+    return visible
+  return visible.map((sheet) => {
+    if (sheet.userId === viewer.userId)
+      return sheet
+    return {
+      ...sheet,
+      notes: '',
+      spells: sheet.spells.map(({ text: _text, ...spell }) => spell),
+    }
+  })
+}
+
+export async function buildSnapshot(userId: string, campaignId: string): Promise<SnapshotDto | null> {
+  const [member] = await db
+    .select({ role: campaignMembers.role })
+    .from(campaignMembers)
+    .where(and(eq(campaignMembers.campaignId, campaignId), eq(campaignMembers.userId, userId)))
+    .limit(1)
+  if (!member)
+    return null
+  const state = await loadCampaignState(campaignId)
+  if (!state)
+    return null
+  return viewSnapshot(state, { userId, role: member.role })
 }
 
 function rollCheck(bonus: number, mode: 'normal' | 'advantage' | 'disadvantage', exhaustion: number) {

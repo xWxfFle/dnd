@@ -4,7 +4,7 @@ import { ActionIcon, Badge, Button, Divider, Group, Modal, NumberInput, Paper, S
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
-import { srdQuery } from '@/shared/api'
+import { srdKitQuery } from '@/shared/api'
 import { gearReplaced } from './model'
 
 const kindLabel = {
@@ -132,7 +132,7 @@ function AddGearModal(props: {
   onClose: () => void
   onAdd: (item: InventoryItem) => void
 }) {
-  const { entries } = useUnit({ entries: srdQuery.data })
+  const { entries } = useUnit({ entries: srdKitQuery.data })
   const catalog = entries ?? []
   const [name, setName] = useState('')
   const [kind, setKind] = useState<ItemKind>('gear')

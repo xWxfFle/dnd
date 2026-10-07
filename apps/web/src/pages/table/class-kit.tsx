@@ -4,12 +4,13 @@ import { ActionIcon, Box, Button, Divider, Group, Modal, NumberInput, Paper, Sel
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
-import { srdQuery } from '@/shared/api'
+import { srdKitQuery, srdSpellsQuery } from '@/shared/api'
 import { featureUsed, kitError, resourceSpent, spellCast, spellsReplaced } from './model'
 
 export function ClassKit(props: { sheet: CharacterDto }) {
-  const { entries, error, applyFeature, cast, replaceSpells, spend } = useUnit({
-    entries: srdQuery.data,
+  const { kit, spells, error, applyFeature, cast, replaceSpells, spend } = useUnit({
+    kit: srdKitQuery.data,
+    spells: srdSpellsQuery.data,
     error: kitError,
     applyFeature: featureUsed,
     cast: spellCast,
@@ -17,14 +18,15 @@ export function ClassKit(props: { sheet: CharacterDto }) {
     spend: resourceSpent,
   })
   const [open, setOpen] = useState(false)
-  const classEntry = (entries ?? []).find(entry => entry.id === props.sheet.classId)
-  const subclassEntry = (entries ?? []).find(entry => entry.id === props.sheet.subclassId)
+  const entries = kit ?? []
+  const catalog = spells ?? []
+  const classEntry = entries.find(entry => entry.id === props.sheet.classId)
+  const subclassEntry = entries.find(entry => entry.id === props.sheet.subclassId)
   const features = featuresForSheet(props.sheet.classId, props.sheet.subclassId, props.sheet.level)
   const classFeatures = features.filter(feature => !feature.subclass)
   const subclassFeatures = features.filter(feature => feature.subclass)
-  const feats = (entries ?? []).filter(entry => entry.kind === 'feat' && props.sheet.featIds.includes(entry.id))
+  const feats = entries.filter(entry => entry.kind === 'feat' && props.sheet.featIds.includes(entry.id))
   const message = error?.characterId === props.sheet.id ? error.message : ''
-  const catalog = (entries ?? []).filter(entry => entry.kind === 'spell')
   const replace = (spells: KnownSpell[]) => replaceSpells({ characterId: props.sheet.id, spells })
   const title = subclassEntry ? `${classEntry?.name ?? 'Класс'} · ${subclassEntry.name}` : classEntry?.name
   return (
@@ -68,9 +70,6 @@ export function ClassKit(props: { sheet: CharacterDto }) {
           sheet={props.sheet}
           onUse={featureId => applyFeature({ characterId: props.sheet.id, featureId })}
         />
-      )}
-      {subclassEntry && subclassFeatures.length === 0 && (
-        <Text size="sm" c="dimmed">Умения этого подкласса в справочник не входят — смотри Player's Handbook 2024.</Text>
       )}
       {feats.length > 0 && (
         <>
@@ -125,7 +124,9 @@ function SpellCard(props: {
   onRemove: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const text = props.spell.text ?? ''
+  const entry = props.catalog.find(item => item.id === props.spell.id)
+  const catalogText = typeof entry?.body.text === 'string' ? entry.body.text : ''
+  const text = props.spell.text || catalogText
   return (
     <Paper withBorder radius="md" p="xs">
       <Group align="flex-start" wrap="nowrap" gap="xs">
@@ -254,13 +255,11 @@ function spellClasses(entry: SrdEntryDto) {
 function knownFromCatalog(entry: SrdEntryDto): KnownSpell {
   const level = Number(entry.body.level ?? 0)
   const dice = typeof entry.body.dice === 'string' ? entry.body.dice : ''
-  const text = typeof entry.body.text === 'string' ? entry.body.text : ''
   return {
     id: entry.id,
     name: entry.name,
     level: Number.isFinite(level) ? Math.min(9, Math.max(0, Math.trunc(level))) : 0,
     ...(dice ? { dice } : {}),
-    ...(text ? { text } : {}),
   }
 }
 

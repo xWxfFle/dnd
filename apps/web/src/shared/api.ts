@@ -69,8 +69,22 @@ export const campaignsQuery = query({
   handler: () => apiRead('/api/campaigns', z.array(campaignSchema)),
 })
 
-export const srdQuery = query({
-  handler: () => apiRead('/api/srd', z.array(srdEntrySchema)),
+const srdListSchema = z.array(srdEntrySchema)
+
+function readSrd(kind: string) {
+  return apiRead(`/api/srd?kind=${kind}`, srdListSchema)
+}
+
+export const srdKitQuery = query({
+  handler: () => readSrd('class,subclass,species,background,feat,item'),
+})
+
+export const srdSpellsQuery = query({
+  handler: () => readSrd('spell'),
+})
+
+export const srdMonstersQuery = query({
+  handler: () => readSrd('monster'),
 })
 
 export const snapshotQuery = query({

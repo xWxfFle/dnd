@@ -4,6 +4,7 @@ import { ActionIcon, Avatar, Button, FileButton, Group, Modal, NumberInput, Pape
 import { IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
+import { srdMonstersQuery } from '@/shared/api'
 import {
   blankMobPlaced,
   monsterId,
@@ -32,6 +33,7 @@ const blankAbilities: Abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10,
 export function AddMobModal(props: { opened: boolean, onClose: () => void, sceneReady: boolean }) {
   const state = useUnit({
     catalog: monsters,
+    pending: srdMonstersQuery.pending,
     pickedId: monsterId,
     pick: monsterSelected,
     monster: selectedMonster,
@@ -95,7 +97,7 @@ export function AddMobModal(props: { opened: boolean, onClose: () => void, scene
                 aria-label="Поиск монстра"
                 placeholder="Поставить из каталога"
                 searchable
-                nothingFoundMessage="Нет такого монстра"
+                nothingFoundMessage={state.pending ? 'Загружаем…' : 'Нет такого монстра'}
                 data={state.catalog.map(monster => ({
                   value: monster.id,
                   label: monsterPickLabel(monster.name, monster.body),

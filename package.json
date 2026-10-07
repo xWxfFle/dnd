@@ -20,7 +20,9 @@
     "srd:import:classes": "bun run scripts/import-dndsu-classes.ts",
     "srd:import:items": "bun run scripts/import-dndsu-items.ts",
     "srd:import:spells": "bun run scripts/import-dndsu-spells.ts",
-    "srd:import:monsters": "bun run scripts/import-dndsu-monsters.ts"
+    "srd:import:monsters": "bun run scripts/import-dndsu-monsters.ts",
+    "srd:import:backgrounds": "bun run scripts/import-dndsu-backgrounds.ts",
+    "srd:import:feats": "bun run scripts/import-dndsu-feats.ts"
   },
   "peerDependencies": {
     "typescript": "^5"

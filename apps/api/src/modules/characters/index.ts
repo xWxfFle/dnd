@@ -1,11 +1,11 @@
 import type { Abilities } from '@dnd/shared'
-import { characterChoiceSchema, createCharacterSchema, imageLimitMb, restSchema, updateCharacterSchema } from '@dnd/shared'
+import { assignCharacterSchema, characterChoiceSchema, createCharacterSchema, imageLimitMb, restSchema, updateCharacterSchema } from '@dnd/shared'
 import { eq, inArray } from 'drizzle-orm'
 import { status } from 'elysia'
 import { db } from '../../db'
 import { characters, combatants, tokens } from '../../db/schema'
 import { deleteToken } from '../../lib/combat'
-import { abilitySheet, applyRest, createCharacter, gearFields, levelUpCharacter, mirrorSheetHp, resolveCharacterChoice, sheetPatchForRole, toCharacterDto } from '../../lib/table'
+import { abilitySheet, applyRest, assignCharacterOwner, compactKnownSpells, createCharacter, gearFields, levelUpCharacter, mirrorSheetHp, normalizeMobs, resolveCharacterChoice, sheetPatchForRole, toCharacterDto, viewCharacters } from '../../lib/table'
 import { rejectUnlessImage, uploadName, writeUpload } from '../../lib/uploads'
 import { broadcast } from '../../live/hub'
 import { campaignRoutes } from '../../plugins/campaign-access'
@@ -27,10 +27,9 @@ async function loadCharacter(campaignId: string, characterId: string, userId: st
 }
 
 export const charactersModule = campaignRoutes('campaign-characters')
-  .get('/:id/characters', async ({ params, role }) => {
+  .get('/:id/characters', async ({ params, role, userId }) => {
     const rows = await db.select().from(characters).where(eq(characters.campaignId, params.id))
-    const visible = role === 'dm' ? rows : rows.filter(row => row.kind !== 'custom')
-    return visible.map(toCharacterDto)
+    return viewCharacters(rows.map(toCharacterDto), { userId, role })
   }, {
     member: true,
     params: idParams,
@@ -39,12 +38,27 @@ export const charactersModule = campaignRoutes('campaign-characters')
     const character = await createCharacter({ ...body, campaignId: params.id, userId })
     if (!character)
       return status(422, { error: 'Класс, вид, предыстория или навыки не сходятся' })
+    await normalizeMobs(params.id)
     await broadcast(params.id)
     return character
   }, {
     member: true,
     params: idParams,
     body: createCharacterSchema,
+  })
+  .post('/:id/characters/:characterId/owner', async ({ params, body }) => {
+    const [current] = await db.select().from(characters).where(eq(characters.id, params.characterId)).limit(1)
+    if (!current || current.campaignId !== params.id)
+      return status(404, { error: 'Not found' })
+    const updated = await assignCharacterOwner(current, body.userId)
+    if (!updated)
+      return status(422, { error: 'Игрок не за этим столом' })
+    await broadcast(params.id)
+    return toCharacterDto(updated)
+  }, {
+    dm: 'Только мастер отдаёт героя',
+    params: characterParams,
+    body: assignCharacterSchema,
   })
   .delete('/:id/characters/:characterId', async ({ userId, params, role }) => {
     const current = await loadCharacter(params.id, params.characterId, userId, role)
@@ -91,6 +105,7 @@ export const charactersModule = campaignRoutes('campaign-characters')
       ...geared,
       ...scored,
       ...hpPatch,
+      ...(Array.isArray(patch.spells) ? { spells: compactKnownSpells(patch.spells) } : {}),
     }
     const [updated] = await db.update(characters).set(next).where(eq(characters.id, params.characterId)).returning()
     if (hpPatch)
