@@ -1,9 +1,10 @@
-import type { Abilities, Ability, AttackDef, InventoryItem, SaveOverrides, TokenDto } from '@dnd/shared'
-import { abilities, abilityLabel, abilityModifier, gearByItemId, monsterEquipment, saveBonus } from '@dnd/shared'
+import type { Abilities, Ability, AttackDef, InventoryItem, SaveOverrides, SrdEntryDto, TokenDto } from '@dnd/shared'
+import { abilities, abilityLabel, abilityModifier, monsterEquipment, readGearBody, saveBonus } from '@dnd/shared'
 import { ActionIcon, Avatar, Button, FileButton, Group, NumberInput, Paper, Stack, Tabs, Text, TextInput } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
+import { srdGearQuery } from '@/shared/api'
 import { HpAdjust, HpBar } from './combat-strip'
 import { GearEditor } from './gear-list'
 import { attackRolled, monsterCheckRolled, tokenHiddenToggled, tokenImageChosen, tokenRemoved, tokenStatsSaved } from './model'
@@ -31,11 +32,12 @@ interface MonsterDraft {
 }
 
 export function MonsterEdit(props: { token: TokenDto }) {
-  const { save, chooseImage, toggleHidden, remove } = useUnit({
+  const { save, chooseImage, toggleHidden, remove, gear } = useUnit({
     save: tokenStatsSaved,
     chooseImage: tokenImageChosen,
     toggleHidden: tokenHiddenToggled,
     remove: tokenRemoved,
+    gear: srdGearQuery.data,
   })
   const [draft, setDraft] = useState(() => draftOf(props.token))
   const [sourceId, setSourceId] = useState(props.token.id)
@@ -109,7 +111,7 @@ export function MonsterEdit(props: { token: TokenDto }) {
           </Stack>
         </Tabs.Panel>
         <Tabs.Panel value="gear" pt="sm">
-          <GearEditor inventory={draft.inventory} onChange={inventory => setDraft(current => wearGear(current, inventory))} />
+          <GearEditor inventory={draft.inventory} onChange={inventory => setDraft(current => wearGear(current, inventory, gear ?? []))} />
         </Tabs.Panel>
       </Tabs>
       <Button size="xs" variant="light" disabled={!ready} onClick={() => save(savedBody(token.id, draft))}>Сохранить</Button>
@@ -122,7 +124,10 @@ function MonsterChecks(props: {
   draft: MonsterDraft
   setDraft: (value: MonsterDraft | ((current: MonsterDraft) => MonsterDraft)) => void
 }) {
-  const roll = useUnit(monsterCheckRolled)
+  const { roll, gear } = useUnit({
+    roll: monsterCheckRolled,
+    gear: srdGearQuery.data,
+  })
   const scores = props.token.abilities
   if (!props.draft.abilities && !scores)
     return null
@@ -141,7 +146,7 @@ function MonsterChecks(props: {
               max={30}
               allowDecimal={false}
               value={props.draft.abilities?.[ability] ?? 10}
-              onChange={value => setAbility(props.setDraft, ability, readInt(value, props.draft.abilities?.[ability] ?? 10))}
+              onChange={value => setAbility(props.setDraft, ability, readInt(value, props.draft.abilities?.[ability] ?? 10), gear ?? [])}
             />
           ))}
         </Group>
@@ -259,7 +264,7 @@ function setAc(draft: MonsterDraft, ac: number): MonsterDraft {
   return { ...draft, ac, bareAc: worn ? draft.bareAc : ac }
 }
 
-function wearGear(draft: MonsterDraft, inventory: InventoryItem[]): MonsterDraft {
+function wearGear(draft: MonsterDraft, inventory: InventoryItem[], catalog: SrdEntryDto[]): MonsterDraft {
   if (!draft.abilities)
     return { ...draft, inventory }
   const next = monsterEquipment({
@@ -267,9 +272,17 @@ function wearGear(draft: MonsterDraft, inventory: InventoryItem[]): MonsterDraft
     baseAc: draft.bareAc,
     inventory,
     attacks: draft.attacks,
-    gearOf: gearByItemId,
+    gearOf: itemId => gearLookup(catalog, itemId),
   })
   return { ...draft, inventory: next.inventory, ac: next.ac, attacks: next.attacks }
+}
+
+function gearLookup(catalog: SrdEntryDto[], itemId: string) {
+  const entry = catalog.find(item => item.id === itemId)
+  const stats = readGearBody(entry?.body)
+  if (!entry || !stats)
+    return null
+  return { name: entry.name, stats }
 }
 
 function signed(bonus: number) {
@@ -278,11 +291,11 @@ function signed(bonus: number) {
   return String(bonus)
 }
 
-function setAbility(setDraft: (value: MonsterDraft | ((current: MonsterDraft) => MonsterDraft)) => void, ability: Ability, score: number) {
+function setAbility(setDraft: (value: MonsterDraft | ((current: MonsterDraft) => MonsterDraft)) => void, ability: Ability, score: number, catalog: SrdEntryDto[]) {
   setDraft(current => wearGear({
     ...current,
     abilities: current.abilities ? { ...current.abilities, [ability]: score } : current.abilities,
-  }, current.inventory))
+  }, current.inventory, catalog))
 }
 
 function blankAttack(): AttackDef {

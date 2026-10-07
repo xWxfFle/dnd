@@ -76,7 +76,11 @@ function readSrd(kind: string) {
 }
 
 export const srdKitQuery = query({
-  handler: () => readSrd('class,subclass,species,background,feat,item'),
+  handler: () => readSrd('class,subclass,species,background,feat'),
+})
+
+export const srdGearQuery = query({
+  handler: () => readSrd('item'),
 })
 
 export const srdSpellsQuery = query({

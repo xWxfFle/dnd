@@ -83,6 +83,7 @@ export const characters = pgTable('characters', {
   classResources: jsonb('class_resources').notNull().default([]),
   featureToggles: jsonb('feature_toggles').notNull().default([]),
   featIds: jsonb('feat_ids').notNull().default([]),
+  expertiseSkills: jsonb('expertise_skills').notNull().default([]),
   pendingChoice: text('pending_choice'),
 }, table => [
   index('characters_campaign_id_idx').on(table.campaignId),

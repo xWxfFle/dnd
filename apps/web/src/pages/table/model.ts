@@ -1,9 +1,9 @@
 import type { Abilities, Ability, AttackDef, CreatePresetInput, InventoryItem, KnownSpell, PendingChoice, SaveOverrides, Skill } from '@dnd/shared'
-import { abilityLabel, abilityModifier, d20Formula, featuresForSheet, formatDiceFormula, imageLimitMb, imageTooLarge, parseDice, readAbilities, readArmorClass, readDiceFormula, readInventory, readSaveOverrides, saveBonus, skills, tokenSchema } from '@dnd/shared'
+import { abilityLabel, abilityModifier, d20Formula, featuresFromKit, formatDiceFormula, imageLimitMb, imageTooLarge, parseDice, readAbilities, readArmorClass, readDiceFormula, readInventory, readSaveOverrides, saveBonus, skills, tokenSchema } from '@dnd/shared'
 import { notifications } from '@mantine/notifications'
 import { computed, effect, event, reaction, scoped, store } from '@virentia/core'
 import { trigger } from '@virentia/net-core'
-import { apiRead, apiSend, srdKitQuery, srdMonstersQuery, srdSpellsQuery } from '@/shared/api'
+import { apiRead, apiSend, srdGearQuery, srdKitQuery, srdMonstersQuery, srdSpellsQuery } from '@/shared/api'
 import { characterRoute, homeRoute, tableRoute } from '@/shared/routing'
 import { appScope, readUserId } from '@/shared/session'
 import { readAttacks } from './attacks'
@@ -69,6 +69,7 @@ export const campaignMembers = computed(() => liveSnapshot.value?.members ?? [])
 export const catalogNames = computed(() => Object.fromEntries(
   [
     ...(srdKitQuery.data.value ?? []),
+    ...(srdGearQuery.data.value ?? []),
     ...(srdSpellsQuery.data.value ?? []),
     ...(srdMonstersQuery.data.value ?? []),
   ].map(entry => [entry.id, entry.name]),
@@ -152,6 +153,7 @@ export const levelUpRequested = event<string>()
 export const abilityScoreEdited = event<{ characterId: string, ability: Ability, score: number }>()
 export const hpMaxEdited = event<{ characterId: string, hpMax: number }>()
 export const skillProficiencyToggled = event<{ characterId: string, skill: Skill }>()
+export const expertiseToggled = event<{ characterId: string, skill: Skill }>()
 export const presetSaved = event<CreatePresetInput>()
 export const presetRemoved = event<string>()
 export const presetSpawned = event<{ presetId: string, copies: number, image?: File }>()
@@ -667,6 +669,20 @@ export function bootTableModel() {
       },
     })
     reaction({
+      on: expertiseToggled,
+      run({ characterId, skill }) {
+        const sheet = characterById(characterId)
+        if (!sheet || !dm.value || !skills.includes(skill) || !sheet.skillProficiencies.includes(skill))
+          return
+        const active = sheet.expertiseSkills.includes(skill)
+        patchCharacter(characterId, {
+          expertiseSkills: active
+            ? sheet.expertiseSkills.filter(item => item !== skill)
+            : [...sheet.expertiseSkills, skill],
+        })
+      },
+    })
+    reaction({
       on: presetSaved,
       run(body) {
         const base = campaignBase()
@@ -793,7 +809,7 @@ export function bootTableModel() {
         const sheet = characterById(characterId)
         if (!sheet)
           return
-        const feature = featuresForSheet(sheet.classId, sheet.subclassId, sheet.level).find(item => item.id === featureId)
+        const feature = featuresFromKit(srdKitQuery.data.value ?? [], sheet.classId, sheet.subclassId, sheet.level).find(item => item.id === featureId)
         if (!feature)
           return
         kitError.value = null

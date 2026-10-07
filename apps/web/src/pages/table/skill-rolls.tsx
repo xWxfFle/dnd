@@ -1,10 +1,11 @@
 import type { CharacterDto } from '@dnd/shared'
 import type { SheetRollMode } from './model'
-import { abilities, abilityLabel, abilityModifier, attackBonus, skillAbility, skillLabel, skills } from '@dnd/shared'
+import { abilities, abilityLabel, abilityModifier, attackBonus, featuresFromKit, jackOfAllTrades, skillAbility, skillCheckBonus, skillLabel, skills } from '@dnd/shared'
 import { Badge, Button, Checkbox, Group, Stack, Text } from '@mantine/core'
 import { useUnit } from '@virentia/react'
+import { srdKitQuery } from '@/shared/api'
 import { liveSnapshot } from './live'
-import { dm, sheetCheckRolled, sheetRollMode, sheetRollModeChosen, sheetRollModes, skillProficiencyToggled } from './model'
+import { dm, expertiseToggled, sheetCheckRolled, sheetRollMode, sheetRollModeChosen, sheetRollModes, skillProficiencyToggled } from './model'
 
 const rollModeLabel = {
   normal: 'Обычно',
@@ -29,15 +30,18 @@ export function RollModePicker() {
 }
 
 export function SkillRolls(props: { sheet: CharacterDto, canRoll: boolean }) {
-  const { roll, snapshot, master, toggleSkill } = useUnit({
+  const { roll, snapshot, master, toggleSkill, toggleExpertise, kit } = useUnit({
     roll: sheetCheckRolled,
     snapshot: liveSnapshot,
     master: dm,
     toggleSkill: skillProficiencyToggled,
+    toggleExpertise: expertiseToggled,
+    kit: srdKitQuery.data,
   })
   const latest = snapshot?.rolls.at(-1)
   const sheet = props.sheet
   const exhaustion = sheet.exhaustion
+  const jack = jackOfAllTrades(featuresFromKit(kit ?? [], sheet.classId, sheet.subclassId, sheet.level).map(feature => feature.id))
   return (
     <Stack gap="sm">
       {props.canRoll && <RollModePicker />}
@@ -71,19 +75,34 @@ export function SkillRolls(props: { sheet: CharacterDto, canRoll: boolean }) {
         <Stack gap={4}>
           <Text size="xs" c="dimmed">Владение — ставит мастер</Text>
           {skills.map(skill => (
-            <Checkbox
-              key={skill}
-              size="xs"
-              label={skillLabel[skill]}
-              checked={sheet.skillProficiencies.includes(skill)}
-              onChange={() => toggleSkill({ characterId: sheet.id, skill })}
-            />
+            <Group key={skill} gap="xs">
+              <Checkbox
+                size="xs"
+                label={skillLabel[skill]}
+                checked={sheet.skillProficiencies.includes(skill)}
+                onChange={() => toggleSkill({ characterId: sheet.id, skill })}
+              />
+              {sheet.skillProficiencies.includes(skill) && (
+                <Checkbox
+                  size="xs"
+                  label="Комп."
+                  checked={sheet.expertiseSkills.includes(skill)}
+                  onChange={() => toggleExpertise({ characterId: sheet.id, skill })}
+                />
+              )}
+            </Group>
           ))}
         </Stack>
       )}
       <Group gap="xs">
         {skills.filter(skill => sheet.skillProficiencies.includes(skill)).map((skill) => {
-          const bonus = attackBonus(sheet.abilities, skillAbility[skill], sheet.level, true)
+          const bonus = skillCheckBonus({
+            modifier: abilityModifier(sheet.abilities[skillAbility[skill]]),
+            level: sheet.level,
+            proficient: true,
+            expertise: sheet.expertiseSkills.includes(skill),
+            jack: false,
+          })
           return (
             <SkillChip
               key={skill}
@@ -99,7 +118,13 @@ export function SkillRolls(props: { sheet: CharacterDto, canRoll: boolean }) {
       <Text size="xs">Прочие навыки</Text>
       <Group gap="xs">
         {skills.filter(skill => !sheet.skillProficiencies.includes(skill)).map((skill) => {
-          const bonus = attackBonus(sheet.abilities, skillAbility[skill], sheet.level, false)
+          const bonus = skillCheckBonus({
+            modifier: abilityModifier(sheet.abilities[skillAbility[skill]]),
+            level: sheet.level,
+            proficient: false,
+            expertise: false,
+            jack,
+          })
           return (
             <SkillChip
               key={skill}

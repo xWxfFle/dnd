@@ -170,6 +170,7 @@ export const characterSchema = z.object({
   classResources: z.array(classResourceSchema),
   featureToggles: z.array(z.string()),
   featIds: z.array(z.string()),
+  expertiseSkills: skillListSchema,
   pendingChoice: pendingChoiceSchema.nullable(),
 })
 
@@ -179,7 +180,18 @@ export const createCharacterSchema = z.object({
   classId: z.string().min(1),
   backgroundId: z.string().min(1),
   abilities: abilitiesSchema,
+  backgroundBonuses: z.object({
+    str: z.number().int().min(0).max(2).optional(),
+    dex: z.number().int().min(0).max(2).optional(),
+    con: z.number().int().min(0).max(2).optional(),
+    int: z.number().int().min(0).max(2).optional(),
+    wis: z.number().int().min(0).max(2).optional(),
+    cha: z.number().int().min(0).max(2).optional(),
+  }),
+  startingPack: z.enum(['a', 'b']),
   skillProficiencies: skillListSchema,
+  weaponMasteries: z.array(z.string()).max(3).optional(),
+  expertiseSkills: skillListSchema.optional(),
 })
 
 export const updateCharacterSchema = characterSchema.omit({

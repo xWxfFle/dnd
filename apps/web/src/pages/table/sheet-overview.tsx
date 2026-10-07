@@ -1,5 +1,5 @@
 import type { CharacterDto } from '@dnd/shared'
-import { abilityLabel, abilityModifier, isDeadFromExhaustion, proficiencyBonus, skillLabel } from '@dnd/shared'
+import { abilityLabel, abilityModifier, attackBonus, isDeadFromExhaustion, proficiencyBonus, skillLabel, spellSaveDc } from '@dnd/shared'
 import { ActionIcon, Alert, Avatar, Badge, Button, FileButton, Group, NumberInput, Paper, SimpleGrid, Stack, Text, Textarea, TextInput } from '@mantine/core'
 import { useUnit } from '@virentia/react'
 import { srdKitQuery } from '@/shared/api'
@@ -96,6 +96,11 @@ export function SheetOverview(props: {
           <Text size="sm">
             {`КД ${sheet.ac} · ${sheet.speed} фт · Владение +${bonus} · Кости хитов ${sheet.hitDiceRemaining}/${sheet.level} (${sheet.hitDie})`}
           </Text>
+          {sheet.castingAbility && (
+            <Text size="sm">
+              {`СЛ ${spellSaveDc(sheet.abilities, sheet.castingAbility, sheet.level)} · атака заклинанием ${signedMod(attackBonus(sheet.abilities, sheet.castingAbility, sheet.level, true))}`}
+            </Text>
+          )}
           <Text size="sm">{`Навыки: ${namedList(sheet.skillProficiencies, skillLabel)}`}</Text>
           <Text size="sm">{`Спасброски: ${namedList(sheet.saveProficiencies, abilityLabel)}`}</Text>
           {props.editable && sheet.level < 20 && !pending && (
@@ -320,10 +325,13 @@ function sheetTitle(sheet: CharacterDto, catalog: Record<string, string>) {
 }
 
 function modifierText(score: number) {
-  const mod = abilityModifier(score)
-  if (mod > 0)
-    return `+${mod}`
-  return String(mod)
+  return signedMod(abilityModifier(score))
+}
+
+function signedMod(value: number) {
+  if (value > 0)
+    return `+${value}`
+  return String(value)
 }
 
 function readInt(value: string, fallback: number) {

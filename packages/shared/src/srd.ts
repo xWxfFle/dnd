@@ -1,4 +1,6 @@
-import type { ClassFeature, ClassResource, ClassTable, GearAbility, GearStats, ResourceRecover, Skill } from './types'
+import type { ClassResource, ResourceRecover, Skill } from './types'
+import { readGearBody } from './rules'
+import { acceptSkillChoiceFromKit, featuresFromKit, readClassTables, skillChoiceFromKit } from './sheet-kit'
 import backgroundRows from './srd-2024-backgrounds.json'
 import classRows from './srd-2024-classes.json'
 import featRows from './srd-2024-feats.json'
@@ -43,95 +45,10 @@ export function skillOfferForClass(classId: string) {
   return { skillChoices, skills: list.length > 0 ? list : [...skills] }
 }
 
-export function readClassFeatures(body: Record<string, unknown>): ClassFeature[] {
-  if (!Array.isArray(body.features))
-    return []
-  return body.features.flatMap((item) => {
-    if (!item || typeof item !== 'object')
-      return []
-    const row = item as Record<string, unknown>
-    if (typeof row.id !== 'string' || typeof row.name !== 'string' || typeof row.text !== 'string')
-      return []
-    const feature: ClassFeature = {
-      id: row.id,
-      name: row.name,
-      text: row.text,
-      level: typeof row.level === 'number' ? row.level : 1,
-      subclass: row.subclass === true || typeof row.subclassId === 'string',
-    }
-    if (typeof row.subclassId === 'string')
-      feature.subclassId = row.subclassId
-    if (typeof row.formula === 'string' && row.formula.length > 0)
-      feature.formula = row.formula
-    return [feature]
-  })
-}
+export { readClassFeatures, readClassTables } from './sheet-kit'
 
-export function readClassTables(body: Record<string, unknown>): ClassTable[] {
-  if (!Array.isArray(body.tables))
-    return []
-  return body.tables.flatMap((item) => {
-    if (!item || typeof item !== 'object')
-      return []
-    const row = item as Record<string, unknown>
-    if (typeof row.id !== 'string' || typeof row.name !== 'string' || !row.values || typeof row.values !== 'object')
-      return []
-    const values: Record<string, string> = {}
-    for (const [level, value] of Object.entries(row.values as Record<string, unknown>)) {
-      if (typeof value === 'string')
-        values[level] = value
-    }
-    return [{ id: row.id, name: row.name, values }]
-  })
-}
-
-const formulaTableByFeature: Record<string, string> = {
-  'bardic-inspiration': 'bardic-die',
-  'second-wind': 'second-wind',
-  'sneak-attack': 'sneak-attack',
-  'martial-arts': 'martial-arts',
-}
-
-function scaledFormula(feature: ClassFeature, tables: ClassTable[], level: number) {
-  if (feature.id === 'second-wind')
-    return `1d10+${level}`
-  const tableId = formulaTableByFeature[feature.id] ?? feature.id
-  const table = tables.find(item => item.id === tableId || item.id === feature.id || item.id.replace(/-count$/, '') === feature.id)
-  const value = table?.values[String(level)]
-  if (value && /\d+d\d+/.test(value))
-    return value.replace(/^\+/, '')
-  if (feature.formula)
-    return feature.formula.replace(/\blevel\b/gi, String(level))
-  return undefined
-}
-
-export function featuresForSheet(classId: string, subclassId: string, level: number): ClassFeature[] {
-  const klass = srdById(classId)
-  if (!klass || klass.kind !== 'class')
-    return []
-  const tables = readClassTables(klass.body)
-  const chosen = subclassId.startsWith('subclass-') ? subclassId : subclassId ? `subclass-${subclassId}` : ''
-  const subclass = chosen ? srdById(chosen) : null
-  const classFeatures = readClassFeatures(klass.body).map(feature => ({
-    ...feature,
-    formula: scaledFormula(feature, tables, level),
-  }))
-  const subFeatures = subclass?.kind === 'subclass'
-    ? readClassFeatures(subclass.body).map(feature => ({
-        ...feature,
-        subclass: true,
-        subclassId: subclass.id,
-        formula: scaledFormula(feature, tables, level),
-      }))
-    : []
-  return [...classFeatures, ...subFeatures]
-    .filter(feature => feature.level <= level && !isMetaFeature(feature.name))
-    .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, 'ru'))
-}
-
-function isMetaFeature(name: string) {
-  return /подкласс|список заклинаний|увеличение характеристик|эпический дар|основные черты/i.test(name)
-    || /subclass|spell list|ability score|epic boon|core .+ traits|spell slots|slot level/i.test(name)
+export function featuresForSheet(classId: string, subclassId: string, level: number) {
+  return featuresFromKit(srdCatalog, classId, subclassId, level)
 }
 
 export function resourcesForLevel(classId: string, level: number, previous: ClassResource[] = []): ClassResource[] {
@@ -274,53 +191,6 @@ const items: SrdSeed[] = itemRows.map(row => ({
   body: { ...(row.gear ?? { kind: 'gear' }), category: row.category, cost: row.cost, weight: row.weight, text: row.text },
 }))
 
-const gearAbilityByKey = {
-  str: 'str',
-  dex: 'dex',
-  finesse: 'finesse',
-} as const satisfies Record<string, GearAbility>
-
-const readGearByKind = {
-  weapon: readWeaponGear,
-  armor: readArmorGear,
-  shield: readShieldGear,
-  gear: readPlainGear,
-} as const
-
-export function readGearBody(body: Record<string, unknown> | null | undefined): GearStats | null {
-  if (!body)
-    return null
-  const kind = body.kind
-  if (typeof kind !== 'string' || !Object.hasOwn(readGearByKind, kind))
-    return null
-  return readGearByKind[kind as keyof typeof readGearByKind](body)
-}
-
-function readWeaponGear(body: Record<string, unknown>): GearStats | null {
-  const ability = typeof body.ability === 'string' && Object.hasOwn(gearAbilityByKey, body.ability)
-    ? gearAbilityByKey[body.ability as keyof typeof gearAbilityByKey]
-    : null
-  if (typeof body.dice !== 'string' || typeof body.damageType !== 'string' || !ability)
-    return null
-  return { kind: 'weapon', dice: body.dice, damageType: body.damageType, ability }
-}
-
-function readArmorGear(body: Record<string, unknown>): GearStats | null {
-  if (typeof body.base !== 'number')
-    return null
-  if (body.dexCap != null && typeof body.dexCap !== 'number')
-    return null
-  return { kind: 'armor', base: body.base, dexCap: typeof body.dexCap === 'number' ? body.dexCap : null }
-}
-
-function readShieldGear(): GearStats {
-  return { kind: 'shield' }
-}
-
-function readPlainGear(): GearStats {
-  return { kind: 'gear' }
-}
-
 // Здесь только то, что нужно правилам листа и в интерфейсе. Заклинания, монстры и магические предметы лежат в srd-full.ts:
 // интерфейс получает их через /api/srd, иначе они попадают в бандл.
 srdCatalog.length = 0
@@ -351,38 +221,11 @@ export function originFeatId(backgroundId: string) {
 }
 
 export function skillChoiceForOrigin(classId: string, backgroundId: string) {
-  const offer = skillOfferForClass(classId)
-  if (!offer)
-    return null
-  const granted = backgroundSkillGrant(backgroundId)
-  const grantedSet = new Set<string>(granted)
-  return {
-    granted,
-    skillChoices: offer.skillChoices,
-    // Сколько навыков даёт класс — правило, какие именно — решение мастера, поэтому список класса только подсказка.
-    suggested: offer.skills.filter(skill => !grantedSet.has(skill)),
-    skills: skills.filter(skill => !grantedSet.has(skill)),
-  }
+  return skillChoiceFromKit(srdCatalog, classId, backgroundId)
 }
 
 export function acceptSkillChoice(chosen: readonly Skill[], classId: string, backgroundId: string) {
-  const choice = skillChoiceForOrigin(classId, backgroundId)
-  if (!choice)
-    return null
-  const unique = new Set(chosen)
-  if (unique.size !== chosen.length)
-    return null
-  for (const skill of choice.granted) {
-    if (!unique.has(skill))
-      return null
-  }
-  const picked = chosen.filter(skill => !choice.granted.includes(skill))
-  if (picked.length !== choice.skillChoices)
-    return null
-  const offered = new Set(choice.skills)
-  if (picked.some(skill => !offered.has(skill)))
-    return null
-  return [...choice.granted, ...picked]
+  return acceptSkillChoiceFromKit(chosen, classId, backgroundId, srdCatalog)
 }
 
 export function gearByItemId(itemId: string) {

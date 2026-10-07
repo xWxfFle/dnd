@@ -637,3 +637,50 @@ function contains(points: number[], x: number, y: number) {
   }
   return inside
 }
+
+const gearAbilityByKey = {
+  str: 'str',
+  dex: 'dex',
+  finesse: 'finesse',
+} as const satisfies Record<string, GearAbility>
+
+const readGearByKind = {
+  weapon: readWeaponGear,
+  armor: readArmorGear,
+  shield: readShieldGear,
+  gear: readPlainGear,
+} as const
+
+export function readGearBody(body: Record<string, unknown> | null | undefined): GearStats | null {
+  if (!body)
+    return null
+  const kind = body.kind
+  if (typeof kind !== 'string' || !Object.hasOwn(readGearByKind, kind))
+    return null
+  return readGearByKind[kind as keyof typeof readGearByKind](body)
+}
+
+function readWeaponGear(body: Record<string, unknown>): GearStats | null {
+  const ability = typeof body.ability === 'string' && Object.hasOwn(gearAbilityByKey, body.ability)
+    ? gearAbilityByKey[body.ability as keyof typeof gearAbilityByKey]
+    : null
+  if (typeof body.dice !== 'string' || typeof body.damageType !== 'string' || !ability)
+    return null
+  return { kind: 'weapon', dice: body.dice, damageType: body.damageType, ability }
+}
+
+function readArmorGear(body: Record<string, unknown>): GearStats | null {
+  if (typeof body.base !== 'number')
+    return null
+  if (body.dexCap != null && typeof body.dexCap !== 'number')
+    return null
+  return { kind: 'armor', base: body.base, dexCap: typeof body.dexCap === 'number' ? body.dexCap : null }
+}
+
+function readShieldGear(): GearStats {
+  return { kind: 'shield' }
+}
+
+function readPlainGear(): GearStats {
+  return { kind: 'gear' }
+}

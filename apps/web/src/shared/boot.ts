@@ -1,5 +1,15 @@
 import type { Skill } from '@dnd/shared'
-import { acceptSkillChoice, skillChoiceForOrigin } from '@dnd/shared'
+import {
+  acceptBackgroundAsi,
+  acceptExpertisePicks,
+  acceptSkillChoiceFromKit,
+  acceptWeaponMasteries,
+  backgroundAbilitiesFromKit,
+  classMasteryFromKit,
+  createExpertiseNeed,
+  emptyBackgroundAsi,
+  skillChoiceFromKit,
+} from '@dnd/shared'
 import { reaction, scoped } from '@virentia/core'
 import { createField, createForm, createWizardForm, readStoreSnapshot, step } from '@virentia/forms'
 
@@ -20,6 +30,7 @@ import {
   meQuery,
   registerMutation,
   snapshotQuery,
+  srdGearQuery,
   srdKitQuery,
   srdSpellsQuery,
 } from './api'
@@ -48,15 +59,45 @@ const abilityField = () => createField(10, { validate: zodFieldValidator(z.numbe
 const classIdField = createField('class-fighter')
 const backgroundIdField = createField('background-soldier')
 
+const kitEntries = () => srdKitQuery.data.value ?? []
+
 const skillsField = createField<Skill[]>(['athletics', 'intimidation'], {
   validate(value, ctx) {
     if (new Set(value).size !== value.length)
       return 'Навыки без повторов'
     const classId = ctx.read(classIdField.state)
     const backgroundId = ctx.read(backgroundIdField.state)
-    if (!acceptSkillChoice(value, classId, backgroundId))
-      return `Навыков сверх предыстории должно быть ${skillChoiceForOrigin(classId, backgroundId)?.skillChoices ?? 0}`
+    const kit = kitEntries()
+    if (!acceptSkillChoiceFromKit(value, classId, backgroundId, kit))
+      return `Навыков сверх предыстории должно быть ${skillChoiceFromKit(kit, classId, backgroundId)?.skillChoices ?? 0}`
     return null
+  },
+  validationStrategies: ['change', 'submit'],
+})
+
+const backgroundAsiField = createField(emptyBackgroundAsi(), {
+  validate(value, ctx) {
+    const listed = backgroundAbilitiesFromKit(kitEntries(), ctx.read(backgroundIdField.state))
+    return acceptBackgroundAsi(listed, value) ? null : 'Распредели +2 и +1 среди характеристик предыстории'
+  },
+  validationStrategies: ['change', 'submit'],
+})
+
+const packField = createField<'a' | 'b'>('a')
+
+const masteriesField = createField<string[]>([], {
+  validate(value, ctx) {
+    const classId = ctx.read(classIdField.state)
+    return acceptWeaponMasteries(value, classId, classMasteryFromKit(kitEntries(), classId)) ? null : 'Выбери мастерство оружия'
+  },
+  validationStrategies: ['change', 'submit'],
+})
+
+const expertiseField = createField<Skill[]>([], {
+  validate(value, ctx) {
+    const classId = ctx.read(classIdField.state)
+    const picked = ctx.read(skillsField.state)
+    return acceptExpertisePicks(value, picked, createExpertiseNeed(classId)) ? null : 'Выбери компетентность'
   },
   validationStrategies: ['change', 'submit'],
 })
@@ -72,14 +113,21 @@ export const characterWizard = createWizardForm({
     int: abilityField(),
     wis: abilityField(),
     cha: abilityField(),
+    backgroundAsi: backgroundAsiField,
+    pack: packField,
     skills: skillsField,
+    masteries: masteriesField,
+    expertise: expertiseField,
     name: createField('Герой', { validate: zodFieldValidator(z.string().min(1)) }),
   },
   steps: form => [
     step('class', { form: form.pick({ classId: true }) }),
     step('origin', { form: form.pick({ speciesId: true, backgroundId: true }) }),
-    step('abilities', { form: form.pick({ str: true, dex: true, con: true, int: true, wis: true, cha: true }) }),
+    step('pack', { form: form.pick({ pack: true }) }),
+    step('abilities', { form: form.pick({ str: true, dex: true, con: true, int: true, wis: true, cha: true, backgroundAsi: true }) }),
     step('skills', { form: form.pick({ classId: true, backgroundId: true, skills: true }) }),
+    step('mastery', { form: form.pick({ classId: true, masteries: true }) }),
+    step('expertise', { form: form.pick({ classId: true, skills: true, expertise: true }) }),
     step('name', { form: form.pick({ name: true }) }),
   ],
 })
@@ -139,7 +187,8 @@ export function bootClient() {
         const values = readStoreSnapshot(characterWizard.form.values)
         if (!campaignId)
           return
-        const skills = acceptSkillChoice(values.skills, values.classId, values.backgroundId)
+        const kit = kitEntries()
+        const skills = acceptSkillChoiceFromKit(values.skills, values.classId, values.backgroundId, kit)
         if (!skills)
           return
         void createCharacterMutation({
@@ -157,7 +206,11 @@ export function bootClient() {
               wis: values.wis,
               cha: values.cha,
             },
+            backgroundBonuses: values.backgroundAsi,
+            startingPack: values.pack,
             skillProficiencies: skills,
+            weaponMasteries: values.masteries,
+            expertiseSkills: values.expertise,
           },
         })
       },
@@ -184,6 +237,7 @@ export function bootClient() {
       filter: () => Boolean(token.value),
     })
     trigger(srdKitQuery, { on: [characterRoute.opened, tableRoute.opened] })
+    trigger(srdGearQuery, { on: tableRoute.opened })
     trigger(srdSpellsQuery, { on: tableRoute.opened })
     trigger(snapshotQuery, {
       on: [tableRoute.opened, characterRoute.opened],

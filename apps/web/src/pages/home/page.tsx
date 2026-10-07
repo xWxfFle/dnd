@@ -85,11 +85,7 @@ export function HomePage() {
               <div>
                 <Text fw={700}>{campaign.name}</Text>
                 <Text size="sm" c="dimmed">
-                  {campaign.role === 'dm' ? 'Мастер' : 'Игрок'}
-                  {' '}
-                  · код
-                  {' '}
-                  {campaign.inviteCode}
+                  {campaign.role === 'dm' ? `Мастер · код ${campaign.inviteCode}` : 'Игрок'}
                 </Text>
               </div>
               <Group gap="xs">

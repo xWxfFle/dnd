@@ -1,5 +1,5 @@
 import type { CharacterDto, ClassFeature, KnownSpell, SrdEntryDto } from '@dnd/shared'
-import { featuresForSheet } from '@dnd/shared'
+import { featuresFromKit, weaponMasteryChoices } from '@dnd/shared'
 import { ActionIcon, Box, Button, Divider, Group, Modal, NumberInput, Paper, Select, Stack, Text, TextInput } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { srdKitQuery, srdSpellsQuery } from '@/shared/api'
 import { featureUsed, kitError, resourceSpent, spellCast, spellsReplaced } from './model'
 
-export function ClassKit(props: { sheet: CharacterDto }) {
+export function ClassKit(props: { sheet: CharacterDto, editable: boolean }) {
   const { kit, spells, error, applyFeature, cast, replaceSpells, spend } = useUnit({
     kit: srdKitQuery.data,
     spells: srdSpellsQuery.data,
@@ -22,7 +22,7 @@ export function ClassKit(props: { sheet: CharacterDto }) {
   const catalog = spells ?? []
   const classEntry = entries.find(entry => entry.id === props.sheet.classId)
   const subclassEntry = entries.find(entry => entry.id === props.sheet.subclassId)
-  const features = featuresForSheet(props.sheet.classId, props.sheet.subclassId, props.sheet.level)
+  const features = featuresFromKit(entries, props.sheet.classId, props.sheet.subclassId, props.sheet.level)
   const classFeatures = features.filter(feature => !feature.subclass)
   const subclassFeatures = features.filter(feature => feature.subclass)
   const feats = entries.filter(entry => entry.kind === 'feat' && props.sheet.featIds.includes(entry.id))
@@ -47,20 +47,23 @@ export function ClassKit(props: { sheet: CharacterDto }) {
                   style={{ borderRadius: 99 }}
                 />
               ))}
-              <Button size="xs" variant="light" disabled={pool.spent >= pool.max} onClick={() => spend({ characterId: props.sheet.id, resourceId: pool.id })}>
-                Тратить
-              </Button>
+              {props.editable && (
+                <Button size="xs" variant="light" disabled={pool.spent >= pool.max} onClick={() => spend({ characterId: props.sheet.id, resourceId: pool.id })}>
+                  Тратить
+                </Button>
+              )}
             </Group>
           ))}
         </>
       )}
       {props.sheet.weaponMasteries.length > 0 && (
-        <Text size="xs" c="dimmed">{`Мастерство: ${props.sheet.weaponMasteries.join(', ')}`}</Text>
+        <Text size="xs" c="dimmed">{`Мастерство: ${masteryNames(props.sheet.weaponMasteries)}`}</Text>
       )}
       <FeatureGroup
         label="Класс"
         features={classFeatures}
         sheet={props.sheet}
+        editable={props.editable}
         onUse={featureId => applyFeature({ characterId: props.sheet.id, featureId })}
       />
       {subclassEntry && subclassFeatures.length > 0 && (
@@ -68,6 +71,7 @@ export function ClassKit(props: { sheet: CharacterDto }) {
           label="Подкласс"
           features={subclassFeatures}
           sheet={props.sheet}
+          editable={props.editable}
           onUse={featureId => applyFeature({ characterId: props.sheet.id, featureId })}
         />
       )}
@@ -87,9 +91,11 @@ export function ClassKit(props: { sheet: CharacterDto }) {
       <Divider label="Заклинания" labelPosition="left" />
       <Group justify="space-between" wrap="nowrap">
         <Text size="sm" fw={600}>Список</Text>
-        <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => setOpen(true)}>
-          Добавить
-        </Button>
+        {props.editable && (
+          <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => setOpen(true)}>
+            Добавить
+          </Button>
+        )}
       </Group>
       {props.sheet.spells.length === 0 && <Text size="sm" c="dimmed">Пусто</Text>}
       {props.sheet.spells.map(spell => (
@@ -97,21 +103,24 @@ export function ClassKit(props: { sheet: CharacterDto }) {
           key={spell.id}
           spell={spell}
           catalog={catalog}
+          editable={props.editable}
           onCast={() => cast({ characterId: props.sheet.id, spellId: spell.id })}
           onRemove={() => replace(props.sheet.spells.filter(item => item.id !== spell.id))}
         />
       ))}
-      <AddSpellModal
-        opened={open}
-        catalog={catalog}
-        known={props.sheet.spells}
-        classId={props.sheet.classId}
-        onClose={() => setOpen(false)}
-        onAdd={(spell) => {
-          replace([...props.sheet.spells, spell])
-          setOpen(false)
-        }}
-      />
+      {props.editable && (
+        <AddSpellModal
+          opened={open}
+          catalog={catalog}
+          known={props.sheet.spells}
+          classId={props.sheet.classId}
+          onClose={() => setOpen(false)}
+          onAdd={(spell) => {
+            replace([...props.sheet.spells, spell])
+            setOpen(false)
+          }}
+        />
+      )}
       {message ? <Text size="xs" c="red">{message}</Text> : null}
     </Stack>
   )
@@ -120,6 +129,7 @@ export function ClassKit(props: { sheet: CharacterDto }) {
 function SpellCard(props: {
   spell: KnownSpell
   catalog: SrdEntryDto[]
+  editable: boolean
   onCast: () => void
   onRemove: () => void
 }) {
@@ -145,12 +155,16 @@ function SpellCard(props: {
               )
             : null}
         </Stack>
-        <Button size="xs" variant="light" onClick={props.onCast}>
-          {rollsDice(props.spell, props.catalog) ? 'Бросить' : 'Ячейка'}
-        </Button>
-        <ActionIcon size="input-xs" variant="subtle" aria-label="Убрать заклинание" onClick={props.onRemove}>
-          <IconTrash size={14} />
-        </ActionIcon>
+        {props.editable && (
+          <>
+            <Button size="xs" variant="light" onClick={props.onCast}>
+              {rollsDice(props.spell, props.catalog) ? 'Бросить' : 'Ячейка'}
+            </Button>
+            <ActionIcon size="input-xs" variant="subtle" aria-label="Убрать заклинание" onClick={props.onRemove}>
+              <IconTrash size={14} />
+            </ActionIcon>
+          </>
+        )}
       </Group>
     </Paper>
   )
@@ -293,6 +307,7 @@ function FeatureGroup(props: {
   label: string
   features: ClassFeature[]
   sheet: CharacterDto
+  editable: boolean
   onUse: (featureId: string) => void
 }) {
   if (props.features.length === 0)
@@ -305,14 +320,22 @@ function FeatureGroup(props: {
           <Stack gap={4}>
             <Text size="sm" fw={600}>{`${feature.name} · ${feature.level} ур.`}</Text>
             <Text size="sm" c="dimmed">{feature.text}</Text>
-            <Button size="xs" variant={featureButtonVariant(feature, props.sheet.featureToggles)} onClick={() => props.onUse(feature.id)}>
-              {featureLabel(feature, props.sheet.featureToggles)}
-            </Button>
+            {props.editable && (
+              <Button size="xs" variant={featureButtonVariant(feature, props.sheet.featureToggles)} onClick={() => props.onUse(feature.id)}>
+                {featureLabel(feature, props.sheet.featureToggles)}
+              </Button>
+            )}
           </Stack>
         </Paper>
       ))}
     </>
   )
+}
+
+const masteryNameById = Object.fromEntries(weaponMasteryChoices.map(item => [item.id, item.name]))
+
+function masteryNames(ids: string[]) {
+  return ids.map(id => masteryNameById[id] ?? id).join(', ')
 }
 
 function featureButtonVariant(feature: { id: string, formula?: string }, toggles: string[]) {

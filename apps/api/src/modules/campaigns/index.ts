@@ -20,7 +20,7 @@ function toCampaign(campaign: typeof campaigns.$inferSelect, role: 'dm' | 'playe
     id: campaign.id,
     name: campaign.name,
     description: campaign.description,
-    inviteCode: campaign.inviteCode,
+    inviteCode: role === 'dm' ? campaign.inviteCode : '',
     role,
     createdAt: campaign.createdAt.toISOString(),
   }

@@ -5,6 +5,7 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
+    "./srd": "./src/srd.ts",
     "./srd-full": "./src/srd-full.ts"
   },
   "main": "./src/index.ts",

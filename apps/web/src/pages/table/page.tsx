@@ -1,6 +1,6 @@
 import type { AttackDef, CharacterDto, TokenDto } from '@dnd/shared'
 import { abilities, abilityLabel, imageLimitMb } from '@dnd/shared'
-import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput, Divider, Drawer, FileButton, Group, Modal, NumberInput, Paper, SegmentedControl, Select, Slider, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput, Divider, Drawer, FileButton, Group, Modal, NumberInput, Paper, SegmentedControl, Select, Slider, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
@@ -607,6 +607,7 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
         <Tabs.Tab value="overview">Обзор</Tabs.Tab>
         <Tabs.Tab value="checks">Проверки</Tabs.Tab>
         <Tabs.Tab value="attacks">Атаки</Tabs.Tab>
+        <Tabs.Tab value="kit">Умения</Tabs.Tab>
         <Tabs.Tab value="gear">Снаряжение</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="overview" pt="sm">
@@ -642,20 +643,10 @@ function CharacterSheet(props: { sheet: CharacterDto, onMap: boolean, sceneReady
               <SlotPips slots={sheet.slots} />
             </>
           )}
-          {editable && (
-            <>
-              <Divider />
-              <Accordion variant="contained">
-                <Accordion.Item value="kit">
-                  <Accordion.Control>Умения и заклинания</Accordion.Control>
-                  <Accordion.Panel>
-                    <ClassKit sheet={sheet} />
-                  </Accordion.Panel>
-                </Accordion.Item>
-              </Accordion>
-            </>
-          )}
         </Stack>
+      </Tabs.Panel>
+      <Tabs.Panel value="kit" pt="sm">
+        <ClassKit sheet={sheet} editable={editable} />
       </Tabs.Panel>
       <Tabs.Panel value="gear" pt="sm">
         <Stack gap="sm">
