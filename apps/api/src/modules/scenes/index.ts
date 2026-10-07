@@ -1,4 +1,4 @@
-import { createSceneSchema, createTokenSchema, fogPolygonSchema, hpSchema, moveTokenSchema, updateSceneSchema, updateTokenSchema } from '@dnd/shared'
+import { createSceneSchema, createTokenSchema, fogPolygonSchema, hpSchema, imageLimitMb, moveTokenSchema, updateSceneSchema, updateTokenSchema } from '@dnd/shared'
 import { eq } from 'drizzle-orm'
 import { status } from 'elysia'
 import { z } from 'zod'
@@ -98,7 +98,7 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     params: sceneCharacterParams,
   })
   .post('/:id/scenes/:sceneId/map', async ({ params, body }) => {
-    const rejected = await rejectUnlessImage(body.file, 'Нужен файл карты')
+    const rejected = await rejectUnlessImage(body.file, 'Нужен файл карты', imageLimitMb.map)
     if (rejected)
       return rejected
     const storagePath = await writeUpload(`${params.sceneId}-${uploadName(body.file.name)}`, body.file)
@@ -149,7 +149,7 @@ export const scenesModule = campaignRoutes('campaign-scenes')
     body: updateTokenSchema,
   })
   .post('/:id/tokens/:tokenId/image', async ({ params, body }) => {
-    const rejected = await rejectUnlessImage(body.file, 'Нужна картинка')
+    const rejected = await rejectUnlessImage(body.file, 'Нужна картинка', imageLimitMb.portrait)
     if (rejected)
       return rejected
     const [current] = await db.select().from(tokens).where(eq(tokens.id, params.tokenId)).limit(1)

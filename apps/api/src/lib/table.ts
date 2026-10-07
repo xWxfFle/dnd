@@ -31,10 +31,10 @@ import {
   skills,
   spellSlotsForClass,
   srdById,
-  srdCatalog,
   subclassLevelOf,
   unarmoredAbility,
 } from '@dnd/shared'
+import { srdFullById, srdFullCatalog } from '@dnd/shared/srd-full'
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { db } from '../db'
 import {
@@ -265,7 +265,7 @@ function fileMark(filePath: string) {
 }
 
 function srd(id: string) {
-  return srdCatalog.find(entry => entry.id === id)
+  return srdFullById(id)
 }
 
 function saveProficienciesOf(row: CharacterRow) {
@@ -284,7 +284,7 @@ function knownSpellFromSrd(entry: { id: string, name: string, body: Record<strin
     name: entry.name,
     level: Number.isFinite(level) ? Math.min(9, Math.max(0, Math.trunc(level))) : 0,
     ...(dice ? { dice } : {}),
-    ...(text ? { text: text.slice(0, 600) } : {}),
+    ...(text ? { text: text.slice(0, 5000) } : {}),
   }
 }
 
@@ -883,7 +883,7 @@ export async function ensureDemoUsers() {
 }
 
 export async function ensureSrd() {
-  await db.insert(srdEntries).values(srdCatalog.map(entry => ({
+  await db.insert(srdEntries).values(srdFullCatalog.map(entry => ({
     id: entry.id,
     kind: entry.kind,
     name: entry.name,
@@ -896,7 +896,7 @@ export async function ensureSrd() {
       body: sql`excluded.body`,
     },
   })
-  await db.delete(srdEntries).where(notInArray(srdEntries.id, srdCatalog.map(entry => entry.id)))
+  await db.delete(srdEntries).where(notInArray(srdEntries.id, srdFullCatalog.map(entry => entry.id)))
 }
 
 export function deadIfExhausted(level: number) {

@@ -1,5 +1,5 @@
 import type { AttackDef, CharacterDto, TokenDto } from '@dnd/shared'
-import { abilities, abilityLabel, abilityModifier, isDeadFromExhaustion } from '@dnd/shared'
+import { abilities, abilityLabel, abilityModifier, imageLimitMb, isDeadFromExhaustion } from '@dnd/shared'
 import { Accordion, ActionIcon, Avatar, Badge, Box, Button, Collapse, ColorInput, Divider, Drawer, FileButton, Group, Modal, NumberInput, Paper, SegmentedControl, Select, Slider, Stack, Tabs, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
@@ -841,7 +841,7 @@ function LevelChoiceModal(props: { sheet: CharacterDto }) {
         )}
         {pending === 'subclass' && (
           <>
-            <Text size="sm" c="dimmed">Четыре подкласса PHB 2024. Текст умений в справочнике только у SRD-варианта класса.</Text>
+            <Text size="sm" c="dimmed">Четыре подкласса PHB 2024.</Text>
             <Select label="Подкласс" data={subclassOptions} value={pickedSubclass} onChange={setSubclassId} />
             <Button disabled={!pickedSubclass} onClick={() => pickedSubclass && submit({ characterId: props.sheet.id, body: { kind: 'subclass', subclassId: pickedSubclass } })}>
               Выбрать
@@ -1136,7 +1136,7 @@ function MapUpload() {
       {buttonProps => (
         <Stack gap={4}>
           <Button {...buttonProps} size="xs" variant="default">Загрузить карту</Button>
-          <Text size="xs" c="dimmed">Файл хранится как есть, до 4K. PNG, JPG, WebP.</Text>
+          <Text size="xs" c="dimmed">{`Файл хранится как есть, до ${imageLimitMb.map} МБ. PNG, JPG, WebP, GIF.`}</Text>
         </Stack>
       )}
     </FileButton>

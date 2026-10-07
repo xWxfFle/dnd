@@ -1,6 +1,16 @@
 export const APP_NAME = 'Стол D&D' as const
 export const API_VERSION = 'v1' as const
 
+// Лимит загрузки картинок в мегабайтах. client_max_body_size в apps/web/nginx.conf должен пропускать самый большой.
+export const imageLimitMb = {
+  map: 50,
+  portrait: 10,
+} as const
+
+export function imageTooLarge(file: { size: number }, limitMb: number) {
+  return file.size > limitMb * 1024 * 1024
+}
+
 export const SRD_ATTRIBUTION
   = 'This work includes material from the System Reference Document 5.2 (“SRD 5.2”) by Wizards of the Coast LLC, available at https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative Commons Attribution 4.0 International License, available at https://creativecommons.org/licenses/by/4.0/legalcode.'
 
@@ -98,7 +108,11 @@ export interface ShieldStats {
   kind: 'shield'
 }
 
-export type GearStats = WeaponStats | ArmorStats | ShieldStats
+export interface PlainGearStats {
+  kind: 'gear'
+}
+
+export type GearStats = WeaponStats | ArmorStats | ShieldStats | PlainGearStats
 
 export interface InventoryItem {
   id: string

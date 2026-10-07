@@ -118,7 +118,7 @@ export const knownSpellSchema = z.object({
   name: z.string(),
   level: z.number().int().min(0).max(9),
   dice: z.string().max(40).optional(),
-  text: z.string().max(600).optional(),
+  text: z.string().max(5000).optional(),
 })
 
 export const pendingChoiceSchema = z.enum(['asi', 'subclass', 'feat'])

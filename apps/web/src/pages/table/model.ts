@@ -1,5 +1,6 @@
 import type { Abilities, Ability, AttackDef, CreatePresetInput, InventoryItem, KnownSpell, PendingChoice, SaveOverrides, Skill } from '@dnd/shared'
-import { abilityLabel, abilityModifier, d20Formula, featuresForSheet, formatDiceFormula, parseDice, readAbilities, readArmorClass, readDiceFormula, readInventory, readSaveOverrides, saveBonus, skills, tokenSchema } from '@dnd/shared'
+import { abilityLabel, abilityModifier, d20Formula, featuresForSheet, formatDiceFormula, imageLimitMb, imageTooLarge, parseDice, readAbilities, readArmorClass, readDiceFormula, readInventory, readSaveOverrides, saveBonus, skills, tokenSchema } from '@dnd/shared'
+import { notifications } from '@mantine/notifications'
 import { computed, effect, event, reaction, scoped, store } from '@virentia/core'
 import { apiRead, apiSend, srdQuery } from '@/shared/api'
 import { characterRoute, homeRoute, tableRoute } from '@/shared/routing'
@@ -21,6 +22,14 @@ export const conditionNames = ['ослеплён', 'испуган', 'отрав
 
 const commandFx = effect(async (command: { path: string, method: CommandMethod, body?: unknown }) => {
   await apiSend(command.path, command.method, command.body)
+})
+
+const uploadFx = effect(async (upload: { path: string, file: File, limitMb: number }) => {
+  if (imageTooLarge(upload.file, upload.limitMb))
+    throw new Error(oversizeMessage(upload.limitMb))
+  const body = new FormData()
+  body.set('file', upload.file)
+  await apiSend(upload.path, 'POST', body)
 })
 
 export const scene = computed(() => {
@@ -602,9 +611,7 @@ export function bootTableModel() {
         const base = campaignBase()
         if (!base)
           return
-        const body = new FormData()
-        body.set('file', file)
-        void commandFx({ path: `${base}/characters/${characterId}/avatar`, method: 'POST', body })
+        void uploadFx({ path: `${base}/characters/${characterId}/avatar`, file, limitMb: imageLimitMb.portrait })
       },
     })
     reaction({
@@ -711,9 +718,7 @@ export function bootTableModel() {
         const base = campaignBase()
         if (!current || !base)
           return
-        const body = new FormData()
-        body.set('file', file)
-        void commandFx({ path: `${base}/scenes/${current.id}/map`, method: 'POST', body })
+        void uploadFx({ path: `${base}/scenes/${current.id}/map`, file, limitMb: imageLimitMb.map })
       },
     })
     reaction({
@@ -1017,12 +1022,24 @@ export function bootTableModel() {
         const base = campaignBase()
         if (!base)
           return
-        const body = new FormData()
-        body.set('file', file)
-        void commandFx({ path: `${base}/tokens/${tokenId}/image`, method: 'POST', body })
+        void uploadFx({ path: `${base}/tokens/${tokenId}/image`, file, limitMb: imageLimitMb.portrait })
+      },
+    })
+    reaction({
+      on: uploadFx.failData,
+      run(error) {
+        showUploadError(error instanceof Error ? error.message : 'Не удалось загрузить файл')
       },
     })
   })
+}
+
+function oversizeMessage(limitMb: number) {
+  return `Файл больше ${limitMb} МБ`
+}
+
+function showUploadError(message: string) {
+  notifications.show({ color: 'red', title: 'Картинка не загружена', message })
 }
 
 function campaignBase() {
@@ -1078,6 +1095,11 @@ async function stampMobTokens(stamp: {
   const name = stamp.name.trim()
   if (!current || !base || !name)
     return
+  // Проверяем до создания фишек, иначе часть копий встанет без картинки, а ошибка всплывёт на каждую.
+  if (stamp.image && imageTooLarge(stamp.image, imageLimitMb.portrait)) {
+    showUploadError(oversizeMessage(imageLimitMb.portrait))
+    return
+  }
   const count = Math.min(12, Math.max(1, Math.trunc(stamp.copies)))
   const names = copyNames(name, sceneTokens.value, count)
   for (const [index, label] of names.entries()) {
@@ -1098,9 +1120,7 @@ async function stampMobTokens(stamp: {
     })
     if (!stamp.image)
       continue
-    const body = new FormData()
-    body.set('file', stamp.image)
-    await apiSend(`${base}/tokens/${created.id}/image`, 'POST', body)
+    await uploadFx({ path: `${base}/tokens/${created.id}/image`, file: stamp.image, limitMb: imageLimitMb.portrait })
   }
 }
 

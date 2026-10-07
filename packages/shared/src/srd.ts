@@ -3,8 +3,6 @@ import backgroundRows from './srd-2024-backgrounds.json'
 import classRows from './srd-2024-classes.json'
 import featRows from './srd-2024-feats.json'
 import itemRows from './srd-2024-items.json'
-import monsterRows from './srd-2024-monsters.json'
-import spellRows from './srd-2024-spells.json'
 import subclassRows from './srd-2024-subclasses.json'
 import { skills } from './types'
 
@@ -265,39 +263,11 @@ const feats: SrdSeed[] = featRows.map(row => ({
   body: { category: row.category, text: row.text },
 }))
 
-const spells: SrdSeed[] = spellRows.map(row => ({
-  id: `spell-${row.id}`,
-  kind: 'spell' as const,
-  name: row.name,
-  body: {
-    level: row.level,
-    dice: row.dice,
-    text: row.text,
-    school: row.school,
-    classes: row.classes,
-  },
-}))
-
-const monsters: SrdSeed[] = monsterRows.map(row => ({
-  id: `monster-${row.id}`,
-  kind: 'monster' as const,
-  name: row.name,
-  body: {
-    ac: row.ac,
-    hp: row.hp,
-    speed: row.speed,
-    cr: row.cr,
-    attacks: row.attacks,
-    abilities: row.abilities,
-    saves: row.saves,
-  },
-}))
-
 const items: SrdSeed[] = itemRows.map(row => ({
   id: `item-${row.id}`,
   kind: 'item' as const,
   name: row.name,
-  body: { ...row.gear, text: row.text },
+  body: { ...(row.gear ?? { kind: 'gear' }), category: row.category, cost: row.cost, weight: row.weight, text: row.text },
 }))
 
 const gearAbilityByKey = {
@@ -310,6 +280,7 @@ const readGearByKind = {
   weapon: readWeaponGear,
   armor: readArmorGear,
   shield: readShieldGear,
+  gear: readPlainGear,
 } as const
 
 export function readGearBody(body: Record<string, unknown> | null | undefined): GearStats | null {
@@ -342,6 +313,12 @@ function readShieldGear(): GearStats {
   return { kind: 'shield' }
 }
 
+function readPlainGear(): GearStats {
+  return { kind: 'gear' }
+}
+
+// Здесь только то, что нужно правилам листа и в интерфейсе. Заклинания, монстры и магические предметы лежат в srd-full.ts:
+// интерфейс получает их через /api/srd, иначе они попадают в бандл.
 srdCatalog.length = 0
 srdCatalog.push(
   ...classes,
@@ -349,8 +326,6 @@ srdCatalog.push(
   ...species,
   ...backgrounds,
   ...feats,
-  ...spells,
-  ...monsters,
   ...items,
 )
 

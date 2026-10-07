@@ -1,5 +1,5 @@
 import type { Abilities } from '@dnd/shared'
-import { characterChoiceSchema, createCharacterSchema, restSchema, updateCharacterSchema } from '@dnd/shared'
+import { characterChoiceSchema, createCharacterSchema, imageLimitMb, restSchema, updateCharacterSchema } from '@dnd/shared'
 import { eq, inArray } from 'drizzle-orm'
 import { status } from 'elysia'
 import { db } from '../../db'
@@ -151,7 +151,7 @@ export const charactersModule = campaignRoutes('campaign-characters')
       return status(404, { error: 'Not found' })
     if (role !== 'dm' && current.userId !== userId)
       return status(403, { error: 'Чужой персонаж' })
-    const rejected = await rejectUnlessImage(body.file, 'Нужен файл портрета')
+    const rejected = await rejectUnlessImage(body.file, 'Нужен файл портрета', imageLimitMb.portrait)
     if (rejected)
       return rejected
     const storagePath = await writeUpload(`avatar-${params.characterId}-${uploadName(body.file.name)}`, body.file)

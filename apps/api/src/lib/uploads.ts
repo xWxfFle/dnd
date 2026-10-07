@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { imageTooLarge } from '@dnd/shared'
 import { status } from 'elysia'
 
 const uploadDir = process.env.UPLOAD_DIR ?? './data/uploads'
@@ -23,7 +24,9 @@ export async function writeUpload(filename: string, file: File) {
   return storagePath
 }
 
-export async function rejectUnlessImage(file: File, error: string) {
+export async function rejectUnlessImage(file: File, error: string, limitMb: number) {
+  if (imageTooLarge(file, limitMb))
+    return status(413, { error: `Файл больше ${limitMb} МБ` })
   const head = new Uint8Array(await file.slice(0, 16).arrayBuffer())
   if (sniffImage(head))
     return null

@@ -1,9 +1,10 @@
-import type { CharacterDto, GearAbility, InventoryItem, ItemKind } from '@dnd/shared'
-import { gearByItemId, readGearBody, srdCatalog } from '@dnd/shared'
+import type { CharacterDto, GearAbility, InventoryItem, ItemKind, SrdEntryDto } from '@dnd/shared'
+import { readGearBody } from '@dnd/shared'
 import { ActionIcon, Badge, Button, Divider, Group, Modal, NumberInput, Paper, Select, Stack, Text, TextInput } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useUnit } from '@virentia/react'
 import { useState } from 'react'
+import { srdQuery } from '@/shared/api'
 import { gearReplaced } from './model'
 
 const kindLabel = {
@@ -26,14 +27,18 @@ const abilityOptions = (Object.keys(abilityLabel) as GearAbility[]).map(ability 
   label: abilityLabel[ability],
 }))
 
-const gearOptions = kindOptions
-  .map(kind => ({
-    group: kind.label,
-    items: srdCatalog
-      .filter(entry => entry.kind === 'item' && readGearBody(entry.body)?.kind === kind.value)
-      .map(entry => ({ value: entry.id, label: entry.name })),
-  }))
-  .filter(group => group.items.length > 0)
+function gearOptionsOf(entries: SrdEntryDto[]) {
+  const catalogItems = entries.filter(entry => entry.kind === 'item')
+  return [
+    ...kindOptions.map(kind => ({
+      group: kind.label,
+      items: catalogItems.filter(entry => entry.body.magic !== true && readGearBody(entry.body)?.kind === kind.value),
+    })),
+    { group: 'Магические предметы', items: catalogItems.filter(entry => entry.body.magic === true) },
+  ]
+    .map(group => ({ group: group.group, items: group.items.map(entry => ({ value: entry.id, label: entry.name })) }))
+    .filter(group => group.items.length > 0)
+}
 
 export function GearList(props: { sheet: CharacterDto }) {
   const replace = useUnit(gearReplaced)
@@ -127,6 +132,8 @@ function AddGearModal(props: {
   onClose: () => void
   onAdd: (item: InventoryItem) => void
 }) {
+  const { entries } = useUnit({ entries: srdQuery.data })
+  const catalog = entries ?? []
   const [name, setName] = useState('')
   const [kind, setKind] = useState<ItemKind>('gear')
   const [dice, setDice] = useState('1d6')
@@ -157,20 +164,19 @@ function AddGearModal(props: {
           aria-label="Добавить предмет"
           placeholder="Из справочника"
           nothingFoundMessage="Нет такого предмета"
-          data={gearOptions}
+          data={gearOptionsOf(catalog)}
           value={null}
           onChange={(value) => {
-            if (!value)
-              return
-            const gear = gearByItemId(value)
-            if (!gear)
+            const entry = catalog.find(item => item.id === value)
+            const stats = readGearBody(entry?.body)
+            if (!entry || !stats)
               return
             props.onAdd({
               id: crypto.randomUUID(),
-              itemId: value,
-              name: gear.name,
+              itemId: entry.id,
+              name: entry.name,
               quantity: 1,
-              kind: gear.stats.kind,
+              kind: stats.kind,
               equipped: false,
             })
             reset()
